@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { useAppStore } from "@/store";
 import KPICard from "@/components/cards/KPICard";
 import {
@@ -12,14 +12,18 @@ import {
   Send,
   PieChart,
   BarChart3,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
+import type { KilnData, PreheaterData, CoolerData, ProductionStatus } from "@/types";
 
 export default function Quality() {
   const { realtimeData, historyData } = useAppStore();
   const { qualityData, kpiData } = realtimeData;
   const qualityHistory = historyData.qualityData;
+  const { kilnData, preheaterData, coolerData, productionStatus } = historyData;
 
   const [formData, setFormData] = useState({
     sampleNo: `S${Date.now().toString().slice(-6)}`,
@@ -30,6 +34,51 @@ export default function Quality() {
     inspector: "",
   });
   const [submitted, setSubmitted] = useState(false);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  const findClosestRecord = <T extends { timestamp: string }>(
+    arr: T[],
+    targetTs: string
+  ): T | null => {
+    if (arr.length === 0) return null;
+    const target = new Date(targetTs).getTime();
+    let closest = arr[0];
+    let minDiff = Math.abs(new Date(closest.timestamp).getTime() - target);
+    for (let i = 1; i < arr.length; i++) {
+      const diff = Math.abs(new Date(arr[i].timestamp).getTime() - target);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = arr[i];
+      }
+    }
+    return closest;
+  };
+
+  const getTraceParams = (qualityTs: string) => {
+    const kiln = findClosestRecord(kilnData, qualityTs);
+    const preheater = findClosestRecord(preheaterData, qualityTs);
+    const cooler = findClosestRecord(coolerData, qualityTs);
+    const production = findClosestRecord(productionStatus, qualityTs);
+    return {
+      kilnSpeed: kiln?.kilnSpeed,
+      kilnCurrent: kiln?.kilnCurrent,
+      calcinerTemp: preheater?.calcinerTemp,
+      calcinerCoalRate: preheater?.calcinerCoalRate,
+      kilnHeadCoalRate: kiln?.kilnHeadCoalRate,
+      clinkerOutletTemp: cooler?.clinkerOutletTemp,
+      coolingEfficiency: cooler?.coolingEfficiency,
+      feedRate: production?.feedRate,
+    };
+  };
+
+  const formatValue = (value: number | undefined, decimals = 2) => {
+    if (value === undefined) return "--";
+    return value.toFixed(decimals);
+  };
+
+  const toggleExpand = (idx: number) => {
+    setExpandedIndex(expandedIndex === idx ? null : idx);
+  };
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
@@ -477,10 +526,15 @@ export default function Quality() {
             <FileText className="w-5 h-5 text-industrial-400" />
             历史质量数据
           </h3>
+          <p className="text-xs text-slate-400 mb-3 flex items-center gap-1">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-industrial-400"></span>
+            点击记录查看对应时段生产参数追溯
+          </p>
           <div className="overflow-x-auto">
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="w-8"></th>
                   <th>时间</th>
                   <th>样品号</th>
                   <th>fCao(%)</th>
@@ -495,30 +549,108 @@ export default function Quality() {
                   const isFCaoPass = d.fCao >= 0.8 && d.fCao <= 2.0;
                   const isLWPass = d.literWeight >= 1150;
                   const allPass = isFCaoPass && isLWPass;
+                  const isExpanded = expandedIndex === idx;
+                  const traceParams = isExpanded ? getTraceParams(d.timestamp) : null;
                   return (
-                    <tr key={idx}>
-                      <td className="text-xs text-slate-400">{formatTime(d.timestamp)}</td>
-                      <td className="font-mono text-xs">{d.sampleNo}</td>
-                      <td className={isFCaoPass ? "" : "text-status-alarm"}>
-                        {d.fCao.toFixed(2)}
-                      </td>
-                      <td className={isLWPass ? "" : "text-status-warning"}>
-                        {d.literWeight}
-                      </td>
-                      <td>{d.strength_3d.toFixed(1)}</td>
-                      <td className="text-slate-400">{d.inspector}</td>
-                      <td>
-                        <span
-                          className={`badge ${
-                            allPass
-                              ? "bg-status-normal/20 text-status-normal"
-                              : "bg-status-warning/20 text-status-warning"
-                          }`}
-                        >
-                          {allPass ? "合格" : "待复核"}
-                        </span>
-                      </td>
-                    </tr>
+                    <Fragment key={idx}>
+                      <tr
+                        className="cursor-pointer hover:bg-slate-700/40 transition-colors"
+                        onClick={() => toggleExpand(idx)}
+                      >
+                        <td className="w-8">
+                          {isExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-industrial-400" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-slate-500" />
+                          )}
+                        </td>
+                        <td className="text-xs text-slate-400">{formatTime(d.timestamp)}</td>
+                        <td className="font-mono text-xs">{d.sampleNo}</td>
+                        <td className={isFCaoPass ? "" : "text-status-alarm"}>
+                          {d.fCao.toFixed(2)}
+                        </td>
+                        <td className={isLWPass ? "" : "text-status-warning"}>
+                          {d.literWeight}
+                        </td>
+                        <td>{d.strength_3d.toFixed(1)}</td>
+                        <td className="text-slate-400">{d.inspector}</td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              allPass
+                                ? "bg-status-normal/20 text-status-normal"
+                                : "bg-status-warning/20 text-status-warning"
+                            }`}
+                          >
+                            {allPass ? "合格" : "待复核"}
+                          </span>
+                        </td>
+                      </tr>
+                      {isExpanded && traceParams && (
+                        <tr className="bg-slate-800/60">
+                          <td colSpan={8} className="py-4 px-4">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              <div className="bg-slate-700/40 rounded-lg p-3">
+                                <p className="text-xs text-slate-400 mb-1">窑速</p>
+                                <p className="font-mono text-lg text-slate-100">
+                                  {formatValue(traceParams.kilnSpeed, 2)}
+                                  <span className="text-xs text-slate-500 ml-1">r/min</span>
+                                </p>
+                              </div>
+                              <div className="bg-slate-700/40 rounded-lg p-3">
+                                <p className="text-xs text-slate-400 mb-1">窑电流</p>
+                                <p className="font-mono text-lg text-slate-100">
+                                  {formatValue(traceParams.kilnCurrent, 0)}
+                                  <span className="text-xs text-slate-500 ml-1">A</span>
+                                </p>
+                              </div>
+                              <div className="bg-slate-700/40 rounded-lg p-3">
+                                <p className="text-xs text-slate-400 mb-1">分解炉温度</p>
+                                <p className="font-mono text-lg text-slate-100">
+                                  {formatValue(traceParams.calcinerTemp, 0)}
+                                  <span className="text-xs text-slate-500 ml-1">℃</span>
+                                </p>
+                              </div>
+                              <div className="bg-slate-700/40 rounded-lg p-3">
+                                <p className="text-xs text-slate-400 mb-1">分解炉喂煤量</p>
+                                <p className="font-mono text-lg text-slate-100">
+                                  {formatValue(traceParams.calcinerCoalRate, 2)}
+                                  <span className="text-xs text-slate-500 ml-1">t/h</span>
+                                </p>
+                              </div>
+                              <div className="bg-slate-700/40 rounded-lg p-3">
+                                <p className="text-xs text-slate-400 mb-1">窑头喂煤量</p>
+                                <p className="font-mono text-lg text-slate-100">
+                                  {formatValue(traceParams.kilnHeadCoalRate, 2)}
+                                  <span className="text-xs text-slate-500 ml-1">t/h</span>
+                                </p>
+                              </div>
+                              <div className="bg-slate-700/40 rounded-lg p-3">
+                                <p className="text-xs text-slate-400 mb-1">熟料冷却温度</p>
+                                <p className="font-mono text-lg text-slate-100">
+                                  {formatValue(traceParams.clinkerOutletTemp, 0)}
+                                  <span className="text-xs text-slate-500 ml-1">℃</span>
+                                </p>
+                              </div>
+                              <div className="bg-slate-700/40 rounded-lg p-3">
+                                <p className="text-xs text-slate-400 mb-1">冷却效率</p>
+                                <p className="font-mono text-lg text-slate-100">
+                                  {formatValue(traceParams.coolingEfficiency, 1)}
+                                  <span className="text-xs text-slate-500 ml-1">%</span>
+                                </p>
+                              </div>
+                              <div className="bg-slate-700/40 rounded-lg p-3">
+                                <p className="text-xs text-slate-400 mb-1">喂料量</p>
+                                <p className="font-mono text-lg text-slate-100">
+                                  {formatValue(traceParams.feedRate, 1)}
+                                  <span className="text-xs text-slate-500 ml-1">t/h</span>
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

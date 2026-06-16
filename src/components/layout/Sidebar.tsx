@@ -12,13 +12,13 @@ import {
 } from "lucide-react";
 
 const menuItems = [
-  { path: "/", label: "总览仪表盘", icon: LayoutDashboard },
-  { path: "/raw-mix", label: "生料配料", icon: FlaskConical },
+  { path: "/dashboard", label: "总览仪表盘", icon: LayoutDashboard },
+  { path: "/raw-material", label: "生料配料", icon: FlaskConical },
   { path: "/grinding", label: "生料粉磨", icon: Hammer },
   { path: "/preheater", label: "预热分解", icon: Flame },
   { path: "/kiln", label: "回转窑煅烧", icon: Factory },
   { path: "/cooler", label: "熟料冷却", icon: Snowflake },
-  { path: "/output", label: "台时产量", icon: Gauge },
+  { path: "/production", label: "台时产量", icon: Gauge },
   { path: "/quality", label: "质量控制", icon: ShieldCheck },
 ];
 

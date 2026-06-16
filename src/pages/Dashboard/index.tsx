@@ -122,6 +122,18 @@ export default function Dashboard() {
     resolved: "text-status-normal",
   };
 
+  const sortedAlarms = useMemo(() => {
+    return [...alarms].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [alarms]);
+
+  const handleConfirm = (alarmId: string) => {
+    useAppStore.getState().confirmAlarm(alarmId, "操作员");
+  };
+
+  const handleResolve = (alarmId: string) => {
+    useAppStore.getState().resolveAlarm(alarmId, "操作员");
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4">
@@ -301,7 +313,7 @@ export default function Dashboard() {
             异常报警列表
           </h3>
           <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
-            {alarms.map((alarm) => (
+            {sortedAlarms.map((alarm) => (
               <div
                 key={alarm.id}
                 className={`rounded-lg p-3 border ${alarmLevelColors[alarm.level]}`}
@@ -317,10 +329,28 @@ export default function Dashboard() {
                     {alarmStatusLabels[alarm.status]}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-400">
+                <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
                   <span>当前值: <span className="text-slate-200 font-medium">{alarm.value}</span> / 阈值: {alarm.threshold}</span>
                   <span>{new Date(alarm.timestamp).toLocaleTimeString()}</span>
                 </div>
+                {alarm.status !== "resolved" && (
+                  <div className="flex gap-2 pt-2 border-t border-slate-700/50">
+                    {alarm.status === "pending" && (
+                      <button
+                        onClick={() => handleConfirm(alarm.id)}
+                        className="flex-1 px-2 py-1 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
+                      >
+                        确认
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleResolve(alarm.id)}
+                      className="flex-1 px-2 py-1 text-xs font-medium bg-status-normal/20 hover:bg-status-normal/30 text-status-normal rounded transition-colors"
+                    >
+                      解决
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

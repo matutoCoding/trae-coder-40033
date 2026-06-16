@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useAppStore } from "@/store";
 import LineChart from "@/components/charts/LineChart";
 import GaugeChart from "@/components/charts/GaugeChart";
-import { PieChart, Target, TrendingUp, History, Mountain, Droplets, Cog, Layers, Flame as FlameIcon } from "lucide-react";
+import { PieChart, Target, TrendingUp, History, Mountain, Droplets, Cog, Layers, Flame as FlameIcon, Calculator, RotateCcw, Plus, Minus } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
+import { calculateModulus, targetRanges } from "@/utils/formulaCalculator";
 
 export default function RawMaterial() {
   const { realtimeData, historyData } = useAppStore();
@@ -21,6 +22,55 @@ export default function RawMaterial() {
     ironPowder: 3,
     sandstone: 4,
     coalAsh: 1,
+  };
+
+  const [adjustRatios, setAdjustRatios] = useState({
+    limestone: rawMaterial.limestone,
+    clay: rawMaterial.clay,
+    ironPowder: rawMaterial.ironPowder,
+    sandstone: rawMaterial.sandstone,
+    coalAsh: rawMaterial.coalAsh,
+  });
+
+  const modulusResult = useMemo(() => calculateModulus(adjustRatios), [adjustRatios]);
+
+  const handleRatioChange = (key: keyof typeof adjustRatios, value: number) => {
+    setAdjustRatios((prev) => ({
+      ...prev,
+      [key]: Math.max(0, Math.min(100, Number(value.toFixed(1)))),
+    }));
+  };
+
+  const handleIncrement = (key: keyof typeof adjustRatios) => {
+    handleRatioChange(key, adjustRatios[key] + 0.5);
+  };
+
+  const handleDecrement = (key: keyof typeof adjustRatios) => {
+    handleRatioChange(key, adjustRatios[key] - 0.5);
+  };
+
+  const resetToActual = () => {
+    setAdjustRatios({
+      limestone: rawMaterial.limestone,
+      clay: rawMaterial.clay,
+      ironPowder: rawMaterial.ironPowder,
+      sandstone: rawMaterial.sandstone,
+      coalAsh: rawMaterial.coalAsh,
+    });
+  };
+
+  const adjustMaterials = [
+    { name: "石灰石", key: "limestone" as const, icon: Mountain, color: "#3B82F6" },
+    { name: "粘土", key: "clay" as const, icon: Droplets, color: "#10B981" },
+    { name: "铁粉", key: "ironPowder" as const, icon: Cog, color: "#F59E0B" },
+    { name: "砂岩", key: "sandstone" as const, icon: Layers, color: "#8B5CF6" },
+    { name: "煤灰", key: "coalAsh" as const, icon: FlameIcon, color: "#EF4444" },
+  ];
+
+  const statusColorMap = {
+    normal: "text-status-normal",
+    warning: "text-status-warning",
+    alarm: "text-status-alarm",
   };
 
   const pieOption: EChartsOption = useMemo(() => {
@@ -208,6 +258,125 @@ export default function RawMaterial() {
               <span>下限: 1.4</span>
               <span className="text-status-normal">目标: 1.4~1.7</span>
               <span>上限: 1.9</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="data-card">
+        <h3 className="section-title">
+          <Calculator className="w-5 h-5 text-industrial-400" />
+          配方调整计算器
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-slate-400">原料配比调整</span>
+              <button
+                onClick={resetToActual}
+                className="flex items-center gap-1 text-xs text-industrial-400 hover:text-industrial-300 transition-colors"
+              >
+                <RotateCcw className="w-3 h-3" />
+                重置为实际配比
+              </button>
+            </div>
+            <div className="space-y-3">
+              {adjustMaterials.map((material) => {
+                const Icon = material.icon;
+                return (
+                  <div key={material.key} className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 w-20">
+                      <Icon className="w-4 h-4" style={{ color: material.color }} />
+                      <span className="text-sm text-slate-300">{material.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-1">
+                      <button
+                        onClick={() => handleDecrement(material.key)}
+                        className="w-7 h-7 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 transition-colors"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <input
+                        type="number"
+                        value={adjustRatios[material.key]}
+                        onChange={(e) => handleRatioChange(material.key, parseFloat(e.target.value) || 0)}
+                        step="0.5"
+                        min="0"
+                        max="100"
+                        className="input-field w-20 text-center"
+                      />
+                      <button
+                        onClick={() => handleIncrement(material.key)}
+                        className="w-7 h-7 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 transition-colors"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                      <span className="text-sm text-slate-400">%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="pt-3 border-t border-slate-700">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">总比例</span>
+                <span className={`text-lg font-bold ${modulusResult.isValid ? "text-status-normal" : "text-status-alarm"}`}>
+                  {modulusResult.total.toFixed(1)}%
+                </span>
+              </div>
+              {!modulusResult.isValid && (
+                <p className="text-xs text-status-alarm mt-1">
+                  ⚠ 总比例不等于100%，请调整配比
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="text-sm text-slate-400 mb-2">三率值计算结果</div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700 text-center">
+                <div className="text-xs text-slate-400 mb-1">KH</div>
+                <div className={`text-xl font-bold ${statusColorMap[modulusResult.khStatus]}`}>
+                  {modulusResult.kh.toFixed(3)}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">石灰饱和系数</div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700 text-center">
+                <div className="text-xs text-slate-400 mb-1">SM</div>
+                <div className={`text-xl font-bold ${statusColorMap[modulusResult.smStatus]}`}>
+                  {modulusResult.sm.toFixed(2)}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">硅率</div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700 text-center">
+                <div className="text-xs text-slate-400 mb-1">IM</div>
+                <div className={`text-xl font-bold ${statusColorMap[modulusResult.imStatus]}`}>
+                  {modulusResult.im.toFixed(2)}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">铝率</div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/30 rounded-lg p-3 border border-slate-700">
+              <div className="text-xs text-slate-400 mb-2">目标范围参考</div>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">KH</span>
+                  <span className="text-status-normal">目标: {targetRanges.kh.lower}~{targetRanges.kh.upper}</span>
+                  <span className="text-status-warning">预警: {targetRanges.kh.warnLow}~{targetRanges.kh.warnHigh}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">SM</span>
+                  <span className="text-status-normal">目标: {targetRanges.sm.lower}~{targetRanges.sm.upper}</span>
+                  <span className="text-status-warning">预警: {targetRanges.sm.warnLow}~{targetRanges.sm.warnHigh}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">IM</span>
+                  <span className="text-status-normal">目标: {targetRanges.im.lower}~{targetRanges.im.upper}</span>
+                  <span className="text-status-warning">预警: {targetRanges.im.warnLow}~{targetRanges.im.warnHigh}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

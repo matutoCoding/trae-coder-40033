@@ -10,13 +10,13 @@ import {
 } from "lucide-react";
 
 const routeTitles: Record<string, string> = {
-  "/": "总览仪表盘",
-  "/raw-mix": "生料配料",
+  "/dashboard": "总览仪表盘",
+  "/raw-material": "生料配料",
   "/grinding": "生料粉磨",
   "/preheater": "预热分解",
   "/kiln": "回转窑煅烧",
   "/cooler": "熟料冷却",
-  "/output": "台时产量",
+  "/production": "台时产量",
   "/quality": "质量控制",
 };
 
