@@ -352,34 +352,70 @@ export default function Dashboard() {
                     {alarmStatusLabels[alarm.status]}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+                <div className="flex items-center justify-between text-xs text-slate-400 mb-3">
                   <span>当前值: <span className="text-slate-200 font-medium">{alarm.value}</span> / 阈值: {alarm.threshold}</span>
                   <span>{new Date(alarm.timestamp).toLocaleTimeString()}</span>
                 </div>
-                {alarm.confirmedAt && (
-                  <div className="bg-slate-800/40 rounded p-2 mb-2 space-y-1">
-                    <div className="text-xs text-slate-500 font-medium mb-1 pb-1 border-b border-slate-700/50">确认信息</div>
-                    <div className="flex gap-4 text-xs text-slate-400">
-                      <span>确认人: <span className="text-slate-200">{alarm.handler}</span></span>
-                      <span>确认时间: <span className="text-slate-200">{new Date(alarm.confirmedAt).toLocaleString()}</span></span>
+
+                <div className="relative pl-5 mb-3">
+                  <div className="absolute left-1.5 top-1 h-full w-px bg-slate-700"></div>
+
+                  <div className="relative mb-4">
+                    <div className={`absolute -left-3.5 top-1 w-3 h-3 rounded-full ${alarm.status === "pending" ? "bg-status-alarm ring-2 ring-status-alarm/30" : alarm.confirmedAt ? "bg-status-alarm" : "bg-slate-600 border-2 border-slate-500"}`}></div>
+                    <div className="text-xs">
+                      <div className="font-medium text-slate-200 mb-0.5">报警发生</div>
+                      <div className="text-slate-400">
+                        {new Date(alarm.timestamp).toLocaleString()}
+                      </div>
+                      <div className="text-slate-400 mt-1">
+                        参数 {alarm.parameter} 异常：当前值 {alarm.value}，阈值 {alarm.threshold}
+                      </div>
                     </div>
-                    {alarm.confirmRemark && (
-                      <div className="text-xs text-slate-400">确认备注: <span className="text-slate-300">{alarm.confirmRemark}</span></div>
-                    )}
                   </div>
-                )}
-                {alarm.resolvedAt && (
-                  <div className="bg-industrial-500/5 rounded p-2 mb-2 space-y-1 border border-industrial-500/10">
-                    <div className="text-xs text-industrial-400/70 font-medium mb-1 pb-1 border-b border-industrial-500/10">解决信息</div>
-                    <div className="flex gap-4 text-xs text-slate-400">
-                      <span>解决人: <span className="text-slate-200">{alarm.handler}</span></span>
-                      <span>解决时间: <span className="text-slate-200">{new Date(alarm.resolvedAt).toLocaleString()}</span></span>
+
+                  <div className="relative mb-4">
+                    <div className={`absolute -left-3.5 top-1 w-3 h-3 rounded-full ${alarm.confirmedAt ? "bg-status-warning" : "bg-slate-600 border-2 border-slate-500"}`}></div>
+                    <div className="text-xs">
+                      <div className={`font-medium mb-0.5 ${alarm.confirmedAt ? "text-slate-200" : "text-slate-500"}`}>确认</div>
+                      {alarm.confirmedAt ? (
+                        <>
+                          <div className="text-slate-400">
+                            {alarm.confirmHandler} · {new Date(alarm.confirmedAt).toLocaleString()}
+                          </div>
+                          {alarm.confirmRemark && (
+                            <div className="text-slate-400 mt-1">
+                              备注：<span className="text-slate-300">{alarm.confirmRemark}</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-slate-500">待确认</div>
+                      )}
                     </div>
-                    {alarm.resolveRemark && (
-                      <div className="text-xs text-slate-400">解决备注: <span className="text-slate-300">{alarm.resolveRemark}</span></div>
-                    )}
                   </div>
-                )}
+
+                  <div className="relative">
+                    <div className={`absolute -left-3.5 top-1 w-3 h-3 rounded-full ${alarm.resolvedAt ? "bg-status-normal" : "bg-slate-600 border-2 border-slate-500"}`}></div>
+                    <div className="text-xs">
+                      <div className={`font-medium mb-0.5 ${alarm.resolvedAt ? "text-slate-200" : "text-slate-500"}`}>解决</div>
+                      {alarm.resolvedAt ? (
+                        <>
+                          <div className="text-slate-400">
+                            {alarm.resolveHandler} · {new Date(alarm.resolvedAt).toLocaleString()}
+                          </div>
+                          {alarm.resolveRemark && (
+                            <div className="text-slate-400 mt-1">
+                              备注：<span className="text-slate-300">{alarm.resolveRemark}</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-slate-500">待解决</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 {alarm.status !== "resolved" && activeForm !== alarm.id && (
                   <div className="flex gap-2 pt-2 border-t border-slate-700/50">
                     {alarm.status === "pending" && (
@@ -390,12 +426,14 @@ export default function Dashboard() {
                         确认
                       </button>
                     )}
-                    <button
-                      onClick={() => openForm(alarm.id, "resolve")}
-                      className="flex-1 px-2 py-1 text-xs font-medium bg-status-normal/20 hover:bg-status-normal/30 text-status-normal rounded transition-colors"
-                    >
-                      解决
-                    </button>
+                    {alarm.status === "confirmed" && (
+                      <button
+                        onClick={() => openForm(alarm.id, "resolve")}
+                        className="flex-1 px-2 py-1 text-xs font-medium bg-status-normal/20 hover:bg-status-normal/30 text-status-normal rounded transition-colors"
+                      >
+                        解决
+                      </button>
+                    )}
                   </div>
                 )}
                 {activeForm === alarm.id && (

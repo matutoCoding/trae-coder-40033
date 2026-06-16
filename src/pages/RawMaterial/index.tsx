@@ -659,6 +659,90 @@ export default function RawMaterial() {
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-status-alarm inline-block" /> 大偏差</span>
                 </div>
               </div>
+
+              <div className="md:col-span-2 bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                <div className="text-xs text-slate-400 mb-3 flex items-center gap-2">
+                  <span>📋</span>
+                  <span>调整方向建议</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-xs text-slate-500 mb-2">配比调整</div>
+                    {(() => {
+                      const ratioSuggestions = adjustMaterials.map((mat) => {
+                        const current = rawMaterialRatios[mat.key];
+                        const planVal = selectedPlan.ratios[mat.key];
+                        const diff = current - planVal;
+                        if (Math.abs(diff) <= 0.5) return null;
+                        if (diff > 0) {
+                          return { name: mat.name, action: "调低", diff, color: "text-status-alarm", arrow: "▼" };
+                        } else {
+                          return { name: mat.name, action: "调高", diff, color: "text-status-normal", arrow: "▲" };
+                        }
+                      }).filter(Boolean) as Array<{ name: string; action: string; diff: number; color: string; arrow: string }>;
+
+                      if (ratioSuggestions.length === 0) {
+                        return <div className="text-xs text-slate-500 flex items-center gap-1"><span>✓</span> 当前配比基本符合方案</div>;
+                      }
+                      return (
+                        <div className="space-y-1.5">
+                          {ratioSuggestions.map((s) => (
+                            <div key={s.name} className="flex items-center gap-2 text-xs">
+                              <span className={`${s.color} font-medium`}>{s.arrow}</span>
+                              <span className={s.color}>
+                                建议{s.action} {s.name}
+                                <span className="text-slate-500">
+                                  ({s.diff > 0 ? "+" : ""}{s.diff.toFixed(1)}%)
+                                </span>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500 mb-2">三率值调整</div>
+                    {(() => {
+                      const modulusSuggestions: string[] = [];
+                      const khDiff = rawMaterialModulus.kh - planModulus.kh;
+                      const smDiff = rawMaterialModulus.sm - planModulus.sm;
+                      const imDiff = rawMaterialModulus.im - planModulus.im;
+
+                      if (khDiff < -0.01) {
+                        modulusSuggestions.push("KH 偏低：石灰石比例偏低，考虑增加石灰石或减少粘土");
+                      } else if (khDiff > 0.01) {
+                        modulusSuggestions.push("KH 偏高：石灰石比例偏高，考虑减少石灰石或增加粘土");
+                      }
+
+                      if (smDiff < -0.05) {
+                        modulusSuggestions.push("SM 偏低：硅质原料不足，考虑增加砂岩");
+                      } else if (smDiff > 0.05) {
+                        modulusSuggestions.push("SM 偏高：硅质原料过多，考虑减少砂岩或增加铁粉");
+                      }
+
+                      if (imDiff < -0.05) {
+                        modulusSuggestions.push("IM 偏低：铁质偏高，考虑减少铁粉");
+                      } else if (imDiff > 0.05) {
+                        modulusSuggestions.push("IM 偏高：铁质不足，考虑增加铁粉");
+                      }
+
+                      if (modulusSuggestions.length === 0) {
+                        return <div className="text-xs text-slate-500 flex items-center gap-1"><span>✓</span> 三率值基本符合方案</div>;
+                      }
+                      return (
+                        <div className="space-y-1.5">
+                          {modulusSuggestions.map((s, idx) => (
+                            <div key={idx} className="text-xs text-industrial-400">
+                              • {s}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment, useEffect, useCallback } from "react";
+import { useState, useMemo, Fragment, useEffect, useCallback, useRef } from "react";
 import { useAppStore } from "@/store";
 import KPICard from "@/components/cards/KPICard";
 import {
@@ -246,6 +246,9 @@ export default function Quality() {
     analysis: "",
     suggestion: "",
   });
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "completed">("all");
+  const [reasonFilter, setReasonFilter] = useState<string>("all");
+  const historyTableRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     persistReviews(reviews);
@@ -377,6 +380,37 @@ export default function Quality() {
   const toggleExpand = (idx: number) => {
     setExpandedIndex(expandedIndex === idx ? null : idx);
   };
+
+  const findQualityIndex = (sampleNo: string, timestamp: string): number => {
+    return qualityHistory.findIndex(
+      (q) => q.sampleNo === sampleNo && q.timestamp === timestamp
+    );
+  };
+
+  const expandAndScrollTo = (sampleNo: string, timestamp: string) => {
+    const idx = findQualityIndex(sampleNo, timestamp);
+    if (idx >= 0) {
+      setExpandedIndex(idx);
+      setTimeout(() => {
+        const el = historyTableRef.current?.querySelector(
+          `tbody tr:nth-child(${idx * 2 + 1})`
+        ) as HTMLElement | null;
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 50);
+    }
+  };
+
+  const filteredReviews = useMemo(() => {
+    return reviews
+      .filter((r) => (statusFilter === "all" ? true : r.status === statusFilter))
+      .filter((r) => (reasonFilter === "all" ? true : r.reason === reasonFilter))
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+  }, [reviews, statusFilter, reasonFilter]);
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
@@ -712,6 +746,131 @@ export default function Quality() {
         </div>
       </div>
 
+      <div className="data-card">
+        <h3 className="section-title">
+          <ClipboardList className="w-5 h-5 text-industrial-400" />
+          质量复核单列表
+        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-400">状态</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as "all" | "pending" | "completed")}
+                className="input-field text-xs py-1.5 px-2 w-32"
+              >
+                <option value="all">全部</option>
+                <option value="pending">待复核</option>
+                <option value="completed">复核完成</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-400">原因</label>
+              <select
+                value={reasonFilter}
+                onChange={(e) => setReasonFilter(e.target.value)}
+                className="input-field text-xs py-1.5 px-2 w-36"
+              >
+                <option value="all">全部</option>
+                {REVIEW_REASONS.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <span className="text-xs text-slate-400">
+            共 <span className="text-slate-200 font-semibold">{filteredReviews.length}</span> 条复核单
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>发起时间</th>
+                <th>关联检测</th>
+                <th>复核原因</th>
+                <th>关联参数</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReviews.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center text-slate-500 py-8">
+                    暂无复核单
+                  </td>
+                </tr>
+              ) : (
+                  filteredReviews.map((review) => (
+                    <tr key={review.id}>
+                      <td className="text-xs text-slate-400">
+                        {new Date(review.createdAt).toLocaleString()}
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => expandAndScrollTo(review.qualityId, review.qualityTimestamp)}
+                          className="text-xs text-industrial-400 hover:text-industrial-300 hover:underline font-mono"
+                        >
+                          {review.qualityId}
+                          <span className="text-slate-500 ml-2">
+                            {formatTime(review.qualityTimestamp)}
+                          </span>
+                        </button>
+                      </td>
+                      <td className="text-xs">{review.reason}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          {review.relatedParams.length > 0 ? (
+                            review.relatedParams.map((p) => (
+                              <span
+                                key={p} className="badge bg-slate-700 text-slate-300">
+                                {PARAM_LABELS[p] || p}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-xs text-slate-500">-</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            review.status === "completed"
+                              ? "bg-status-normal/20 text-status-normal"
+                              : "bg-status-warning/20 text-status-warning"
+                          }`}
+                        >
+                          {review.status === "completed" ? "复核完成" : "待复核"}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => expandAndScrollTo(review.qualityId, review.qualityTimestamp)}
+                            className="px-2 py-1 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
+                          >
+                            查看详情
+                          </button>
+                          {review.status === "pending" && (
+                            <button
+                              onClick={() => completeReview(review.id)}
+                              className="px-2 py-1 text-xs font-medium bg-industrial-500/20 hover:bg-industrial-500/30 text-industrial-400 rounded transition-colors"
+                            >
+                              完成复核
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="data-card">
           <h3 className="section-title">
@@ -828,7 +987,7 @@ export default function Quality() {
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-industrial-400"></span>
             点击记录查看对应时段生产参数追溯
           </p>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" ref={historyTableRef}>
             <table className="data-table">
               <thead>
                 <tr>

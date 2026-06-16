@@ -163,9 +163,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   })(),
   confirmAlarm: (alarmId, { handler, remark }) =>
     set((state) => {
+      const now = new Date().toISOString();
       const alarms = state.alarms.map((alarm) =>
         alarm.id === alarmId
-          ? { ...alarm, status: "confirmed" as const, handler, confirmedAt: new Date().toISOString(), confirmRemark: remark }
+          ? { ...alarm, status: "confirmed" as const, handler, confirmHandler: handler, confirmedAt: now, confirmRemark: remark }
           : alarm
       );
       try { localStorage.setItem('cement_alarm_records', JSON.stringify(alarms)); } catch {}
@@ -173,9 +174,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   resolveAlarm: (alarmId, { handler, remark }) =>
     set((state) => {
+      const now = new Date().toISOString();
       const alarms = state.alarms.map((alarm) =>
         alarm.id === alarmId
-          ? { ...alarm, status: "resolved" as const, handler, resolvedAt: new Date().toISOString(), resolveRemark: remark }
+          ? { ...alarm, status: "resolved" as const, handler, resolveHandler: handler, resolvedAt: now, resolveRemark: remark }
           : alarm
       );
       try { localStorage.setItem('cement_alarm_records', JSON.stringify(alarms)); } catch {}

@@ -113,6 +113,8 @@ export interface Alarm {
   level: "info" | "warning" | "alarm";
   status: "pending" | "confirmed" | "resolved";
   handler?: string;
+  confirmHandler?: string;
+  resolveHandler?: string;
   confirmedAt?: string;
   resolvedAt?: string;
   confirmRemark?: string;

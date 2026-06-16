@@ -33,25 +33,59 @@ interface HandoverRecord {
   confirmed: boolean;
   handoverFrom: string;
   handoverTo: string;
+  confirmedAt?: string;
+}
+
+interface DailyHandover {
+  date: string;
+  shifts: HandoverRecord[];
+  completedAt?: string;
 }
 
 const SHIFT_HANDOVER_KEY = "cement_shift_handover";
 
-const defaultHandovers: HandoverRecord[] = [
-  { shift: "早班", anomalyNote: "窑电流波动大，注意监控", confirmed: true, handoverFrom: "张伟", handoverTo: "李明" },
-  { shift: "中班", anomalyNote: "生料喂料量偏高，已调整", confirmed: false, handoverFrom: "", handoverTo: "" },
-  { shift: "晚班", anomalyNote: "", confirmed: false, handoverFrom: "", handoverTo: "" },
-];
+function getDefaultHandovers(date: string): DailyHandover {
+  const isToday = date === new Date().toISOString().split("T")[0];
+  return {
+    date,
+    shifts: [
+      { shift: "早班", anomalyNote: isToday ? "窑电流波动大，注意监控" : "", confirmed: isToday, handoverFrom: isToday ? "张伟" : "", handoverTo: isToday ? "李明" : "", confirmedAt: isToday ? new Date().toISOString() : undefined },
+      { shift: "中班", anomalyNote: "", confirmed: false, handoverFrom: "", handoverTo: "" },
+      { shift: "晚班", anomalyNote: "", confirmed: false, handoverFrom: "", handoverTo: "" },
+    ],
+  };
+}
 
-function loadHandovers(): HandoverRecord[] {
+function loadAllHandovers(): DailyHandover[] {
   try {
     const saved = localStorage.getItem(SHIFT_HANDOVER_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length === 3) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].date) {
+        return parsed;
+      }
     }
   } catch {}
-  return defaultHandovers;
+  return [];
+}
+
+function loadHandoversForDate(date: string): DailyHandover {
+  const all = loadAllHandovers();
+  const found = all.find((d) => d.date === date);
+  return found || getDefaultHandovers(date);
+}
+
+function saveHandoversForDate(daily: DailyHandover) {
+  const all = loadAllHandovers();
+  const idx = all.findIndex((d) => d.date === daily.date);
+  if (idx >= 0) {
+    all[idx] = daily;
+  } else {
+    all.push(daily);
+  }
+  try {
+    localStorage.setItem(SHIFT_HANDOVER_KEY, JSON.stringify(all));
+  } catch {}
 }
 
 export default function Production() {
@@ -62,18 +96,29 @@ export default function Production() {
   const todayProgress = (kpiData.dailyOutput / DAILY_TARGET) * 100;
 
   const todayStr = new Date().toISOString().split("T")[0];
-  const todayStats = useMemo(() => {
-    const filtered = productionStats.filter((s) => s.date === todayStr);
-    return filtered.length > 0 ? filtered : productionStats.slice(0, 3);
-  }, [productionStats, todayStr]);
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+
+  const selectedDateStats = useMemo(() => {
+    if (selectedDate === todayStr) {
+      const filtered = productionStats.filter((s) => s.date === todayStr);
+      return filtered.length > 0 ? filtered : productionStats.slice(0, 3);
+    }
+    const filtered = productionStats.filter((s) => s.date === selectedDate);
+    if (filtered.length > 0) return filtered;
+    return [
+      { date: selectedDate, shift: "早班", hourlyOutput: 0, dailyOutput: 0, standardCoalConsumption: 0, powerConsumption: 0 },
+      { date: selectedDate, shift: "中班", hourlyOutput: 0, dailyOutput: 0, standardCoalConsumption: 0, powerConsumption: 0 },
+      { date: selectedDate, shift: "晚班", hourlyOutput: 0, dailyOutput: 0, standardCoalConsumption: 0, powerConsumption: 0 },
+    ] as typeof productionStats;
+  }, [productionStats, selectedDate, todayStr]);
 
   const shiftCompletionData = useMemo(() => {
-    return todayStats.map((s) => {
+    return selectedDateStats.map((s) => {
       const cfg = SHIFT_TARGETS[s.shift] || { target: 1000, color: "text-slate-300", bg: "bg-slate-600/20" };
       const actual = s.hourlyOutput * 8;
       const deviation = actual - cfg.target;
-      const deviationRate = (deviation / cfg.target) * 100;
-      const completionRate = (actual / cfg.target) * 100;
+      const deviationRate = cfg.target > 0 ? (deviation / cfg.target) * 100 : 0;
+      const completionRate = cfg.target > 0 ? (actual / cfg.target) * 100 : 0;
       return {
         shift: s.shift,
         target: cfg.target,
@@ -87,12 +132,16 @@ export default function Production() {
         bg: cfg.bg,
       };
     });
-  }, [todayStats]);
+  }, [selectedDateStats]);
 
   const totalTarget = Object.values(SHIFT_TARGETS).reduce((s, v) => s + v.target, 0);
   const totalActual = kpiData.dailyOutput;
   const totalDeviation = totalActual - totalTarget;
   const totalCompletionRate = (totalActual / totalTarget) * 100;
+
+  const selectedDateTotalActual = useMemo(() => {
+    return selectedDateStats.reduce((sum, s) => sum + s.hourlyOutput * 8, 0);
+  }, [selectedDateStats]);
 
   const uniqueDates = [...new Set(productionStats.map((s) => s.date))].slice(0, 7);
   const dailyOutputs = uniqueDates.map((date) => {
@@ -107,41 +156,56 @@ export default function Production() {
     productionStats.slice(0, 7).reduce((sum, s) => sum + s.powerConsumption, 0) /
     Math.min(7, productionStats.length);
 
-  const [handovers, setHandovers] = useState<HandoverRecord[]>(loadHandovers);
+  const [dailyHandover, setDailyHandover] = useState<DailyHandover>(() => loadHandoversForDate(todayStr));
 
-  const saveHandovers = useCallback((records: HandoverRecord[]) => {
-    try {
-      localStorage.setItem(SHIFT_HANDOVER_KEY, JSON.stringify(records));
-    } catch {}
+  const handleDateChange = useCallback((date: string) => {
+    setSelectedDate(date);
+    setDailyHandover(loadHandoversForDate(date));
+  }, []);
+
+  const saveDailyHandover = useCallback((daily: DailyHandover) => {
+    const allConfirmed = daily.shifts.every((h) => h.confirmed);
+    const toSave: DailyHandover = {
+      ...daily,
+      completedAt: allConfirmed && !daily.completedAt ? new Date().toISOString() : daily.completedAt,
+    };
+    saveHandoversForDate(toSave);
+    return toSave;
   }, []);
 
   const handleConfirmHandover = useCallback((shiftIndex: number) => {
-    setHandovers((prev) => {
-      const next = [...prev];
-      next[shiftIndex] = { ...next[shiftIndex], confirmed: true };
-      saveHandovers(next);
-      return next;
+    setDailyHandover((prev) => {
+      const nextShifts = [...prev.shifts];
+      nextShifts[shiftIndex] = {
+        ...nextShifts[shiftIndex],
+        confirmed: true,
+        confirmedAt: new Date().toISOString(),
+      };
+      const next: DailyHandover = { ...prev, shifts: nextShifts };
+      return saveDailyHandover(next);
     });
-  }, [saveHandovers]);
+  }, [saveDailyHandover]);
 
   const handleHandoverFieldChange = useCallback(
     (shiftIndex: number, field: "handoverFrom" | "handoverTo" | "anomalyNote", value: string) => {
-      setHandovers((prev) => {
-        const next = [...prev];
-        next[shiftIndex] = { ...next[shiftIndex], [field]: value };
-        saveHandovers(next);
+      setDailyHandover((prev) => {
+        const nextShifts = [...prev.shifts];
+        nextShifts[shiftIndex] = { ...nextShifts[shiftIndex], [field]: value };
+        const next: DailyHandover = { ...prev, shifts: nextShifts };
+        saveDailyHandover(next);
         return next;
       });
     },
-    [saveHandovers],
+    [saveDailyHandover],
   );
 
+  const handovers = dailyHandover.shifts;
   const allConfirmed = handovers.every((h) => h.confirmed);
 
   const handoverShiftData = useMemo(() => {
     const shifts = ["早班", "中班", "晚班"];
     return shifts.map((shiftName, idx) => {
-      const stat = todayStats.find((s) => s.shift === shiftName);
+      const stat = selectedDateStats.find((s) => s.shift === shiftName);
       return {
         shiftName,
         hourlyOutput: stat?.hourlyOutput ?? 0,
@@ -151,7 +215,7 @@ export default function Production() {
         ...handovers[idx],
       };
     });
-  }, [todayStats, handovers]);
+  }, [selectedDateStats, handovers]);
 
   const combinedOption: EChartsOption = {
     tooltip: {
@@ -378,35 +442,71 @@ export default function Production() {
               </div>
             ))}
             <div className="border-t border-slate-700 pt-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="badge bg-slate-600/30 text-slate-300">今日合计</span>
-                  <span className="text-xs text-slate-400">
-                    目标 <span className="text-slate-200 font-medium">{totalTarget}t</span>
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="text-sm font-semibold text-slate-100">{totalActual}t</span>
-                  <span className={`text-xs ml-2 ${totalDeviation >= 0 ? "text-status-normal" : "text-status-alarm"}`}>
-                    {totalDeviation >= 0 ? "+" : ""}{totalDeviation}t
-                  </span>
-                </div>
-              </div>
-              <div className="h-2.5 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    totalCompletionRate >= 100
-                      ? "bg-status-normal"
-                      : totalCompletionRate >= 80
-                        ? "bg-industrial-500"
-                        : "bg-status-warning"
-                  }`}
-                  style={{ width: `${Math.min(100, totalCompletionRate)}%` }}
-                />
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                总完成率 <span className="text-slate-200 font-medium">{totalCompletionRate.toFixed(1)}%</span>
-              </p>
+              {selectedDate === todayStr ? (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="badge bg-slate-600/30 text-slate-300">今日合计</span>
+                      <span className="text-xs text-slate-400">
+                        目标 <span className="text-slate-200 font-medium">{totalTarget}t</span>
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-semibold text-slate-100">{totalActual}t</span>
+                      <span className={`text-xs ml-2 ${totalDeviation >= 0 ? "text-status-normal" : "text-status-alarm"}`}>
+                        {totalDeviation >= 0 ? "+" : ""}{totalDeviation}t
+                      </span>
+                    </div>
+                  </div>
+                  <div className="h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        totalCompletionRate >= 100
+                          ? "bg-status-normal"
+                          : totalCompletionRate >= 80
+                            ? "bg-industrial-500"
+                            : "bg-status-warning"
+                      }`}
+                      style={{ width: `${Math.min(100, totalCompletionRate)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    总完成率 <span className="text-slate-200 font-medium">{totalCompletionRate.toFixed(1)}%</span>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="badge bg-slate-600/30 text-slate-300">{selectedDate} 合计</span>
+                      <span className="text-xs text-slate-400">
+                        目标 <span className="text-slate-200 font-medium">{totalTarget}t</span>
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-semibold text-slate-100">{selectedDateTotalActual.toFixed(0)}t</span>
+                      <span className={`text-xs ml-2 ${selectedDateTotalActual - totalTarget >= 0 ? "text-status-normal" : "text-status-alarm"}`}>
+                        {selectedDateTotalActual - totalTarget >= 0 ? "+" : ""}{(selectedDateTotalActual - totalTarget).toFixed(0)}t
+                      </span>
+                    </div>
+                  </div>
+                  <div className="h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        (selectedDateTotalActual / totalTarget) * 100 >= 100
+                          ? "bg-status-normal"
+                          : (selectedDateTotalActual / totalTarget) * 100 >= 80
+                            ? "bg-industrial-500"
+                            : "bg-status-warning"
+                      }`}
+                      style={{ width: `${Math.min(100, (selectedDateTotalActual / totalTarget) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    总完成率 <span className="text-slate-200 font-medium">{((selectedDateTotalActual / totalTarget) * 100).toFixed(1)}%</span>
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -424,10 +524,21 @@ export default function Production() {
       </div>
 
       <div className="data-card">
-        <h3 className="section-title">
-          <ClipboardCheck className="w-5 h-5 text-industrial-400" />
-          班组交接记录
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="section-title !mb-0">
+            <ClipboardCheck className="w-5 h-5 text-industrial-400" />
+            班组交接记录
+          </h3>
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => handleDateChange(e.target.value)}
+              className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-industrial-500"
+            />
+          </div>
+        </div>
         <div className="space-y-3">
           {handoverShiftData.map((h, idx) => {
             const shiftColorCfg = SHIFT_TARGETS[h.shiftName] || { color: "text-slate-300", bg: "bg-slate-600/20" };
@@ -520,7 +631,7 @@ export default function Production() {
             {allConfirmed ? (
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-status-normal" />
-                <span className="text-sm font-medium text-status-normal">今日全部班次交接完成</span>
+                <span className="text-sm font-medium text-status-normal">{selectedDate} 全部班次交接完成</span>
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -532,6 +643,78 @@ export default function Production() {
             )}
           </div>
         </div>
+
+        {allConfirmed && (
+          <div className="mt-6 pt-4 border-t border-slate-700">
+            <div className="flex items-center gap-2 mb-3">
+              <h4 className="text-base font-semibold text-slate-100">班报摘要</h4>
+              <span className="badge bg-industrial-500/20 text-industrial-400 text-xs">班报</span>
+              <span className="text-sm text-slate-400 ml-auto">{selectedDate}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>班次</th>
+                    <th>台时产量(t/h)</th>
+                    <th>班产(t)</th>
+                    <th>标煤(kg/t)</th>
+                    <th>电耗(kWh/t)</th>
+                    <th>异常说明</th>
+                    <th>交出人</th>
+                    <th>接收人</th>
+                    <th>交接时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {handoverShiftData.map((h) => (
+                    <tr key={h.shiftName}>
+                      <td>
+                        <span
+                          className={`badge ${
+                            h.shiftName === "早班"
+                              ? "bg-status-normal/20 text-status-normal"
+                              : h.shiftName === "中班"
+                                ? "bg-industrial-500/20 text-industrial-400"
+                                : "bg-status-warning/20 text-status-warning"
+                          }`}
+                        >
+                          {h.shiftName}
+                        </span>
+                      </td>
+                      <td className="font-medium text-slate-100">{h.hourlyOutput.toFixed(1)}</td>
+                      <td>{h.shiftOutput.toFixed(0)}</td>
+                      <td className={h.coal > COAL_TARGET ? "text-status-alarm" : "text-status-normal"}>{h.coal.toFixed(1)}</td>
+                      <td className={h.power > POWER_TARGET ? "text-status-alarm" : "text-status-normal"}>{h.power.toFixed(1)}</td>
+                      <td className="text-slate-400">{h.anomalyNote || "-"}</td>
+                      <td>{h.handoverFrom || "-"}</td>
+                      <td>{h.handoverTo || "-"}</td>
+                      <td className="text-slate-400 text-xs">
+                        {h.confirmedAt ? new Date(h.confirmedAt).toLocaleString() : "-"}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-800/80 font-semibold">
+                    <td className="text-industrial-400">合计/平均</td>
+                    <td className="text-slate-300">-</td>
+                    <td className="text-slate-100">
+                      {handoverShiftData.reduce((sum, h) => sum + h.shiftOutput, 0).toFixed(0)}
+                    </td>
+                    <td className="text-slate-100">
+                      {(handoverShiftData.reduce((sum, h) => sum + h.coal, 0) / handoverShiftData.length).toFixed(1)}
+                    </td>
+                    <td className="text-slate-100">
+                      {(handoverShiftData.reduce((sum, h) => sum + h.power, 0) / handoverShiftData.length).toFixed(1)}
+                    </td>
+                    <td className="text-slate-500" colSpan={4}>
+                      {dailyHandover.completedAt ? `完成时间: ${new Date(dailyHandover.completedAt).toLocaleString()}` : ""}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
