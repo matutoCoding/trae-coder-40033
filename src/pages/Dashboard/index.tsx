@@ -356,17 +356,27 @@ export default function Dashboard() {
                   <span>当前值: <span className="text-slate-200 font-medium">{alarm.value}</span> / 阈值: {alarm.threshold}</span>
                   <span>{new Date(alarm.timestamp).toLocaleTimeString()}</span>
                 </div>
-                {(alarm.status === "confirmed" || alarm.status === "resolved") && alarm.handler && (
-                  <div className="text-xs text-slate-400 bg-slate-800/40 rounded p-2 mb-2 space-y-1">
-                    <div className="flex gap-4">
-                      <span>处理人: <span className="text-slate-200">{alarm.handler}</span></span>
-                      <span>处理时间: <span className="text-slate-200">{new Date(alarm.confirmedAt || alarm.resolvedAt || "").toLocaleString()}</span></span>
+                {alarm.confirmedAt && (
+                  <div className="bg-slate-800/40 rounded p-2 mb-2 space-y-1">
+                    <div className="text-xs text-slate-500 font-medium mb-1 pb-1 border-b border-slate-700/50">确认信息</div>
+                    <div className="flex gap-4 text-xs text-slate-400">
+                      <span>确认人: <span className="text-slate-200">{alarm.handler}</span></span>
+                      <span>确认时间: <span className="text-slate-200">{new Date(alarm.confirmedAt).toLocaleString()}</span></span>
                     </div>
-                    {alarm.confirmRemark && alarm.status === "confirmed" && (
-                      <div>确认备注: <span className="text-slate-300">{alarm.confirmRemark}</span></div>
+                    {alarm.confirmRemark && (
+                      <div className="text-xs text-slate-400">确认备注: <span className="text-slate-300">{alarm.confirmRemark}</span></div>
                     )}
-                    {alarm.resolveRemark && alarm.status === "resolved" && (
-                      <div>解决备注: <span className="text-slate-300">{alarm.resolveRemark}</span></div>
+                  </div>
+                )}
+                {alarm.resolvedAt && (
+                  <div className="bg-industrial-500/5 rounded p-2 mb-2 space-y-1 border border-industrial-500/10">
+                    <div className="text-xs text-industrial-400/70 font-medium mb-1 pb-1 border-b border-industrial-500/10">解决信息</div>
+                    <div className="flex gap-4 text-xs text-slate-400">
+                      <span>解决人: <span className="text-slate-200">{alarm.handler}</span></span>
+                      <span>解决时间: <span className="text-slate-200">{new Date(alarm.resolvedAt).toLocaleString()}</span></span>
+                    </div>
+                    {alarm.resolveRemark && (
+                      <div className="text-xs text-slate-400">解决备注: <span className="text-slate-300">{alarm.resolveRemark}</span></div>
                     )}
                   </div>
                 )}

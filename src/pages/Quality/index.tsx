@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, Fragment, useEffect, useCallback } from "react";
 import { useAppStore } from "@/store";
 import KPICard from "@/components/cards/KPICard";
 import {
@@ -14,10 +14,59 @@ import {
   BarChart3,
   ChevronDown,
   ChevronRight,
+  X,
+  Check,
 } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
 import type { KilnData, PreheaterData, CoolerData, ProductionStatus } from "@/types";
+
+interface QualityReview {
+  id: string;
+  qualityId: string;
+  qualityTimestamp: string;
+  reason: string;
+  relatedParams: string[];
+  analysis: string;
+  suggestion: string;
+  status: "pending" | "completed";
+  createdAt: string;
+  completedAt?: string;
+}
+
+const REVIEW_STORAGE_KEY = "cement_quality_reviews";
+
+function loadReviews(): QualityReview[] {
+  try {
+    const raw = localStorage.getItem(REVIEW_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+
+function persistReviews(reviews: QualityReview[]) {
+  try {
+    localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(reviews));
+  } catch {}
+}
+
+const PARAM_RANGES: Record<string, { min: number; max: number }> = {
+  kilnSpeed: { min: 3.0, max: 4.0 },
+  kilnCurrent: { min: 500, max: 700 },
+  calcinerTemp: { min: 870, max: 920 },
+  clinkerOutletTemp: { min: 65, max: 110 },
+  coalRate: { min: 4.5, max: 7.0 },
+};
+
+const PARAM_LABELS: Record<string, string> = {
+  kilnSpeed: "窑速波动",
+  kilnCurrent: "窑电流异常",
+  calcinerTemp: "分解炉温度偏高",
+  clinkerOutletTemp: "冷却温度偏高",
+  coalRate: "喂煤量异常",
+};
+
+const REVIEW_REASONS = ["fCao超标", "立升重偏低", "波动异常", "其他"];
 
 function getTrendRange<T extends { timestamp: string }>(
   arr: T[],
@@ -189,6 +238,101 @@ export default function Quality() {
   });
   const [submitted, setSubmitted] = useState(false);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [reviews, setReviews] = useState<QualityReview[]>(loadReviews);
+  const [showReviewForm, setShowReviewForm] = useState<number | null>(null);
+  const [reviewForm, setReviewForm] = useState({
+    reason: "",
+    relatedParams: [] as string[],
+    analysis: "",
+    suggestion: "",
+  });
+
+  useEffect(() => {
+    persistReviews(reviews);
+  }, [reviews]);
+
+  const getReviewForRecord = useCallback(
+    (sampleNo: string, timestamp: string) => {
+      return reviews.find((r) => r.qualityId === sampleNo && r.qualityTimestamp === timestamp);
+    },
+    [reviews]
+  );
+
+  const autoDetectParams = useCallback(
+    (qualityTs: string): string[] => {
+      const params = getTraceParams(qualityTs);
+      const detected: string[] = [];
+      if (params.kilnSpeed !== undefined) {
+        const r = PARAM_RANGES.kilnSpeed;
+        if (params.kilnSpeed < r.min || params.kilnSpeed > r.max) detected.push("kilnSpeed");
+      }
+      if (params.kilnCurrent !== undefined) {
+        const r = PARAM_RANGES.kilnCurrent;
+        if (params.kilnCurrent < r.min || params.kilnCurrent > r.max) detected.push("kilnCurrent");
+      }
+      if (params.calcinerTemp !== undefined) {
+        const r = PARAM_RANGES.calcinerTemp;
+        if (params.calcinerTemp < r.min || params.calcinerTemp > r.max) detected.push("calcinerTemp");
+      }
+      if (params.clinkerOutletTemp !== undefined) {
+        const r = PARAM_RANGES.clinkerOutletTemp;
+        if (params.clinkerOutletTemp < r.min || params.clinkerOutletTemp > r.max) detected.push("clinkerOutletTemp");
+      }
+      if (params.calcinerCoalRate !== undefined) {
+        const r = PARAM_RANGES.coalRate;
+        if (params.calcinerCoalRate < r.min || params.calcinerCoalRate > r.max) detected.push("coalRate");
+      }
+      return detected;
+    },
+    [kilnData, preheaterData, coolerData, productionStatus]
+  );
+
+  const openReviewForm = (idx: number) => {
+    const d = qualityHistory[idx];
+    const detected = autoDetectParams(d.timestamp);
+    setReviewForm({
+      reason: "",
+      relatedParams: detected,
+      analysis: "",
+      suggestion: "",
+    });
+    setShowReviewForm(idx);
+  };
+
+  const submitReview = (idx: number) => {
+    const d = qualityHistory[idx];
+    if (!reviewForm.reason) return;
+    const newReview: QualityReview = {
+      id: `review-${Date.now()}`,
+      qualityId: d.sampleNo,
+      qualityTimestamp: d.timestamp,
+      reason: reviewForm.reason,
+      relatedParams: reviewForm.relatedParams,
+      analysis: reviewForm.analysis,
+      suggestion: reviewForm.suggestion,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    };
+    setReviews((prev) => [...prev, newReview]);
+    setShowReviewForm(null);
+  };
+
+  const completeReview = (reviewId: string) => {
+    setReviews((prev) =>
+      prev.map((r) =>
+        r.id === reviewId ? { ...r, status: "completed" as const, completedAt: new Date().toISOString() } : r
+      )
+    );
+  };
+
+  const toggleRelatedParam = (param: string) => {
+    setReviewForm((prev) => ({
+      ...prev,
+      relatedParams: prev.relatedParams.includes(param)
+        ? prev.relatedParams.filter((p) => p !== param)
+        : [...prev.relatedParams, param],
+    }));
+  };
 
   const findClosestRecord = <T extends { timestamp: string }>(
     arr: T[],
@@ -729,15 +873,32 @@ export default function Quality() {
                         <td>{d.strength_3d.toFixed(1)}</td>
                         <td className="text-slate-400">{d.inspector}</td>
                         <td>
-                          <span
-                            className={`badge ${
-                              allPass
-                                ? "bg-status-normal/20 text-status-normal"
-                                : "bg-status-warning/20 text-status-warning"
-                            }`}
-                          >
-                            {allPass ? "合格" : "待复核"}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span
+                              className={`badge ${
+                                allPass
+                                  ? "bg-status-normal/20 text-status-normal"
+                                  : "bg-status-warning/20 text-status-warning"
+                              }`}
+                            >
+                              {allPass ? "合格" : "待复核"}
+                            </span>
+                            {(() => {
+                              const review = getReviewForRecord(d.sampleNo, d.timestamp);
+                              if (!review) return null;
+                              return (
+                                <span
+                                  className={`badge ${
+                                    review.status === "completed"
+                                      ? "bg-industrial-500/20 text-industrial-400"
+                                      : "bg-amber-500/20 text-amber-400"
+                                  }`}
+                                >
+                                  {review.status === "completed" ? "复核完成" : "已发起复核"}
+                                </span>
+                              );
+                            })()}
+                          </div>
                         </td>
                       </tr>
                       {isExpanded && traceParams && (
@@ -802,6 +963,145 @@ export default function Quality() {
                               </div>
                             </div>
                             <SparklineGrid qualityTs={d.timestamp} />
+                            {(() => {
+                              const existingReview = getReviewForRecord(d.sampleNo, d.timestamp);
+                              return (
+                                <div className="mt-4 pt-3 border-t border-slate-700/50">
+                                  {existingReview ? (
+                                    <div className="space-y-3">
+                                      <div className="flex items-center gap-2">
+                                        <span
+                                          className={`badge ${
+                                            existingReview.status === "completed"
+                                              ? "bg-industrial-500/20 text-industrial-400"
+                                              : "bg-amber-500/20 text-amber-400"
+                                          }`}
+                                        >
+                                          {existingReview.status === "completed" ? "复核完成" : "待复核"}
+                                        </span>
+                                        <span className="text-xs text-slate-400">
+                                          复核原因: {existingReview.reason}
+                                        </span>
+                                      </div>
+                                      {existingReview.relatedParams.length > 0 && (
+                                        <div className="flex flex-wrap gap-1">
+                                          {existingReview.relatedParams.map((p) => (
+                                            <span key={p} className="badge bg-slate-700 text-slate-300">
+                                              {PARAM_LABELS[p] || p}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {existingReview.analysis && (
+                                        <div className="text-xs text-slate-400">
+                                          原因分析: <span className="text-slate-300">{existingReview.analysis}</span>
+                                        </div>
+                                      )}
+                                      {existingReview.suggestion && (
+                                        <div className="text-xs text-slate-400">
+                                          处理建议: <span className="text-slate-300">{existingReview.suggestion}</span>
+                                        </div>
+                                      )}
+                                      <div className="text-xs text-slate-500">
+                                        发起时间: {new Date(existingReview.createdAt).toLocaleString()}
+                                      </div>
+                                      {existingReview.status === "pending" && (
+                                        <button
+                                          onClick={() => completeReview(existingReview.id)}
+                                          className="px-3 py-1.5 text-xs font-medium bg-industrial-500/20 hover:bg-industrial-500/30 text-industrial-400 rounded transition-colors"
+                                        >
+                                          <Check className="w-3 h-3 inline mr-1" />
+                                          完成复核
+                                        </button>
+                                      )}
+                                      {existingReview.status === "completed" && existingReview.completedAt && (
+                                        <div className="text-xs text-industrial-400">
+                                          完成时间: {new Date(existingReview.completedAt).toLocaleString()}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : showReviewForm === idx ? (
+                                    <div className="space-y-3">
+                                      <div className="text-sm font-medium text-slate-200 mb-2">发起复核</div>
+                                      <div>
+                                        <label className="block text-xs text-slate-400 mb-1">复核原因</label>
+                                        <select
+                                          value={reviewForm.reason}
+                                          onChange={(e) => setReviewForm({ ...reviewForm, reason: e.target.value })}
+                                          className="input-field w-full text-sm"
+                                        >
+                                          <option value="">请选择复核原因</option>
+                                          {REVIEW_REASONS.map((r) => (
+                                            <option key={r} value={r}>{r}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs text-slate-400 mb-1">关联参数判定</label>
+                                        <div className="flex flex-wrap gap-2">
+                                          {Object.keys(PARAM_LABELS).map((key) => (
+                                            <label
+                                              key={key}
+                                              className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-300 bg-slate-700/40 rounded px-2 py-1"
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={reviewForm.relatedParams.includes(key)}
+                                                onChange={() => toggleRelatedParam(key)}
+                                                className="rounded border-slate-600 bg-slate-800 text-industrial-500 focus:ring-industrial-500"
+                                              />
+                                              {PARAM_LABELS[key]}
+                                            </label>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs text-slate-400 mb-1">原因分析</label>
+                                        <input
+                                          type="text"
+                                          value={reviewForm.analysis}
+                                          onChange={(e) => setReviewForm({ ...reviewForm, analysis: e.target.value })}
+                                          className="input-field w-full text-sm"
+                                          placeholder="请输入原因分析"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs text-slate-400 mb-1">处理建议</label>
+                                        <input
+                                          type="text"
+                                          value={reviewForm.suggestion}
+                                          onChange={(e) => setReviewForm({ ...reviewForm, suggestion: e.target.value })}
+                                          className="input-field w-full text-sm"
+                                          placeholder="请输入处理建议"
+                                        />
+                                      </div>
+                                      <div className="flex gap-2 pt-1">
+                                        <button
+                                          onClick={() => submitReview(idx)}
+                                          disabled={!reviewForm.reason}
+                                          className="px-3 py-1.5 text-xs font-medium bg-industrial-500 hover:bg-industrial-400 disabled:opacity-40 text-white rounded transition-colors"
+                                        >
+                                          提交
+                                        </button>
+                                        <button
+                                          onClick={() => setShowReviewForm(null)}
+                                          className="px-3 py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
+                                        >
+                                          取消
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => openReviewForm(idx)}
+                                      className="px-3 py-1.5 text-xs font-medium bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 rounded transition-colors"
+                                    >
+                                      发起复核
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                         </tr>
                       )}

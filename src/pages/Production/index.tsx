@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { useAppStore } from "@/store";
 import KPICard from "@/components/cards/KPICard";
 
@@ -11,6 +11,10 @@ import {
   BarChart3,
   Clock,
   Target,
+  ClipboardCheck,
+  User,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
@@ -23,6 +27,33 @@ const SHIFT_TARGETS: Record<string, { target: number; color: string; bg: string 
 const COAL_TARGET = 110;
 const POWER_TARGET = 60;
 
+interface HandoverRecord {
+  shift: string;
+  anomalyNote: string;
+  confirmed: boolean;
+  handoverFrom: string;
+  handoverTo: string;
+}
+
+const SHIFT_HANDOVER_KEY = "cement_shift_handover";
+
+const defaultHandovers: HandoverRecord[] = [
+  { shift: "早班", anomalyNote: "窑电流波动大，注意监控", confirmed: true, handoverFrom: "张伟", handoverTo: "李明" },
+  { shift: "中班", anomalyNote: "生料喂料量偏高，已调整", confirmed: false, handoverFrom: "", handoverTo: "" },
+  { shift: "晚班", anomalyNote: "", confirmed: false, handoverFrom: "", handoverTo: "" },
+];
+
+function loadHandovers(): HandoverRecord[] {
+  try {
+    const saved = localStorage.getItem(SHIFT_HANDOVER_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length === 3) return parsed;
+    }
+  } catch {}
+  return defaultHandovers;
+}
+
 export default function Production() {
   const { realtimeData, productionStats } = useAppStore();
   const { kpiData } = realtimeData;
@@ -30,7 +61,11 @@ export default function Production() {
   const DAILY_TARGET = 3000;
   const todayProgress = (kpiData.dailyOutput / DAILY_TARGET) * 100;
 
-  const todayStats = productionStats.slice(0, 3);
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStats = useMemo(() => {
+    const filtered = productionStats.filter((s) => s.date === todayStr);
+    return filtered.length > 0 ? filtered : productionStats.slice(0, 3);
+  }, [productionStats, todayStr]);
 
   const shiftCompletionData = useMemo(() => {
     return todayStats.map((s) => {
@@ -71,6 +106,52 @@ export default function Production() {
   const avgPowerConsumption =
     productionStats.slice(0, 7).reduce((sum, s) => sum + s.powerConsumption, 0) /
     Math.min(7, productionStats.length);
+
+  const [handovers, setHandovers] = useState<HandoverRecord[]>(loadHandovers);
+
+  const saveHandovers = useCallback((records: HandoverRecord[]) => {
+    try {
+      localStorage.setItem(SHIFT_HANDOVER_KEY, JSON.stringify(records));
+    } catch {}
+  }, []);
+
+  const handleConfirmHandover = useCallback((shiftIndex: number) => {
+    setHandovers((prev) => {
+      const next = [...prev];
+      next[shiftIndex] = { ...next[shiftIndex], confirmed: true };
+      saveHandovers(next);
+      return next;
+    });
+  }, [saveHandovers]);
+
+  const handleHandoverFieldChange = useCallback(
+    (shiftIndex: number, field: "handoverFrom" | "handoverTo" | "anomalyNote", value: string) => {
+      setHandovers((prev) => {
+        const next = [...prev];
+        next[shiftIndex] = { ...next[shiftIndex], [field]: value };
+        saveHandovers(next);
+        return next;
+      });
+    },
+    [saveHandovers],
+  );
+
+  const allConfirmed = handovers.every((h) => h.confirmed);
+
+  const handoverShiftData = useMemo(() => {
+    const shifts = ["早班", "中班", "晚班"];
+    return shifts.map((shiftName, idx) => {
+      const stat = todayStats.find((s) => s.shift === shiftName);
+      return {
+        shiftName,
+        hourlyOutput: stat?.hourlyOutput ?? 0,
+        shiftOutput: stat ? stat.hourlyOutput * 8 : 0,
+        coal: stat?.standardCoalConsumption ?? 0,
+        power: stat?.powerConsumption ?? 0,
+        ...handovers[idx],
+      };
+    });
+  }, [todayStats, handovers]);
 
   const combinedOption: EChartsOption = {
     tooltip: {
@@ -342,6 +423,117 @@ export default function Production() {
         </div>
       </div>
 
+      <div className="data-card">
+        <h3 className="section-title">
+          <ClipboardCheck className="w-5 h-5 text-industrial-400" />
+          班组交接记录
+        </h3>
+        <div className="space-y-3">
+          {handoverShiftData.map((h, idx) => {
+            const shiftColorCfg = SHIFT_TARGETS[h.shiftName] || { color: "text-slate-300", bg: "bg-slate-600/20" };
+            return (
+              <div key={h.shiftName} className="bg-slate-800/60 rounded-lg p-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-start">
+                  <div className="flex items-center gap-2">
+                    <span className={`badge ${shiftColorCfg.bg} ${shiftColorCfg.color}`}>{h.shiftName}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-slate-400">产量摘要</p>
+                    <p className="text-sm text-slate-200">
+                      台时均值 <span className="font-medium text-slate-100">{h.hourlyOutput.toFixed(1)}</span> t/h
+                    </p>
+                    <p className="text-sm text-slate-200">
+                      班产小计 <span className="font-medium text-slate-100">{h.shiftOutput.toFixed(0)}</span> t
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-slate-400">煤耗电耗</p>
+                    <p className="text-sm text-slate-200 flex items-center gap-1">
+                      <Flame className="w-3 h-3" />
+                      标煤 <span className={`font-medium ${h.coal > COAL_TARGET ? "text-status-alarm" : "text-status-normal"}`}>{h.coal.toFixed(1)}</span> kg/t
+                    </p>
+                    <p className="text-sm text-slate-200 flex items-center gap-1">
+                      <Zap className="w-3 h-3" />
+                      电耗 <span className={`font-medium ${h.power > POWER_TARGET ? "text-status-alarm" : "text-status-normal"}`}>{h.power.toFixed(1)}</span> kWh/t
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-slate-400">异常说明</p>
+                    <input
+                      type="text"
+                      value={h.anomalyNote}
+                      onChange={(e) => handleHandoverFieldChange(idx, "anomalyNote", e.target.value)}
+                      placeholder="填写异常说明..."
+                      className="w-full bg-slate-700/50 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-industrial-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-slate-400">交接确认</p>
+                    {h.confirmed ? (
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-status-normal" />
+                        <span className="text-xs font-medium text-status-normal">已交接</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-status-warning" />
+                        <span className="text-xs text-status-warning">待交接</span>
+                        <button
+                          onClick={() => handleConfirmHandover(idx)}
+                          className="ml-1 px-2 py-0.5 text-xs bg-industrial-600 hover:bg-industrial-500 text-white rounded transition-colors"
+                        >
+                          确认交接
+                        </button>
+                      </div>
+                    )}
+                    {h.confirmed && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-1">
+                          <User className="w-3 h-3 text-slate-500" />
+                          <input
+                            type="text"
+                            value={h.handoverFrom}
+                            onChange={(e) => handleHandoverFieldChange(idx, "handoverFrom", e.target.value)}
+                            placeholder="交出人"
+                            className="w-16 bg-slate-700/50 border border-slate-600 rounded px-1.5 py-0.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-industrial-500"
+                          />
+                        </div>
+                        <span className="text-slate-500 text-xs">→</span>
+                        <div className="flex items-center gap-1">
+                          <User className="w-3 h-3 text-slate-500" />
+                          <input
+                            type="text"
+                            value={h.handoverTo}
+                            onChange={(e) => handleHandoverFieldChange(idx, "handoverTo", e.target.value)}
+                            placeholder="接收人"
+                            className="w-16 bg-slate-700/50 border border-slate-600 rounded px-1.5 py-0.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-industrial-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div className="border-t border-slate-700 pt-3">
+            {allConfirmed ? (
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-status-normal" />
+                <span className="text-sm font-medium text-status-normal">今日全部班次交接完成</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-status-warning" />
+                <span className="text-sm text-slate-400">
+                  还有 {handovers.filter((h) => !h.confirmed).length} 个班次待交接
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <KPICard
           title="标准煤耗"
@@ -381,7 +573,7 @@ export default function Production() {
               </tr>
             </thead>
             <tbody>
-              {productionStats.slice(0, 14).map((stat, idx) => (
+              {productionStats.filter((s) => s.date !== todayStr).slice(0, 14).map((stat, idx) => (
                 <tr key={idx}>
                   <td>{stat.date}</td>
                   <td>

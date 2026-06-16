@@ -124,6 +124,22 @@ export default function RawMaterial() {
     [selectedPlan]
   );
 
+  const rawMaterialRatios = useMemo<RatioInput>(
+    () => ({
+      limestone: rawMaterial.limestone,
+      clay: rawMaterial.clay,
+      ironPowder: rawMaterial.ironPowder,
+      sandstone: rawMaterial.sandstone,
+      coalAsh: rawMaterial.coalAsh,
+    }),
+    [rawMaterial]
+  );
+
+  const rawMaterialModulus = useMemo(
+    () => calculateModulus(rawMaterialRatios),
+    [rawMaterialRatios]
+  );
+
   const handleRatioChange = (key: keyof RatioInput, value: number) => {
     setAdjustRatios((prev) => ({
       ...prev,
@@ -591,14 +607,14 @@ export default function RawMaterial() {
           <div className="mt-6 pt-4 border-t border-slate-700">
             <h4 className="section-title text-sm mb-3">
               <GitCompare className="w-4 h-4 text-industrial-400" />
-              当前 vs 方案对比（{selectedPlan.name}）
+              现场实际 vs 方案对比（{selectedPlan.name}）
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
                 <div className="text-xs text-slate-400 mb-2">配比差异</div>
                 <div className="space-y-1.5">
                   {adjustMaterials.map((mat) => {
-                    const current = adjustRatios[mat.key];
+                    const current = rawMaterialRatios[mat.key];
                     const planVal = selectedPlan.ratios[mat.key];
                     const diff = current - planVal;
                     return (
@@ -619,9 +635,9 @@ export default function RawMaterial() {
                 <div className="text-xs text-slate-400 mb-2">三率值差异</div>
                 <div className="space-y-1.5">
                   {([
-                    { label: "KH", current: modulusResult.kh, plan: planModulus.kh, decimals: 3 },
-                    { label: "SM", current: modulusResult.sm, plan: planModulus.sm, decimals: 2 },
-                    { label: "IM", current: modulusResult.im, plan: planModulus.im, decimals: 2 },
+                    { label: "KH", current: rawMaterialModulus.kh, plan: planModulus.kh, decimals: 3 },
+                    { label: "SM", current: rawMaterialModulus.sm, plan: planModulus.sm, decimals: 2 },
+                    { label: "IM", current: rawMaterialModulus.im, plan: planModulus.im, decimals: 2 },
                   ] as const).map((item) => {
                     const diff = item.current - item.plan;
                     return (
