@@ -113,6 +113,10 @@ export interface Alarm {
   level: "info" | "warning" | "alarm";
   status: "pending" | "confirmed" | "resolved";
   handler?: string;
+  confirmedAt?: string;
+  resolvedAt?: string;
+  confirmRemark?: string;
+  resolveRemark?: string;
 }
 
 export interface KPIData {

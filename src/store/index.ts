@@ -81,10 +81,12 @@ interface AppState {
   refreshProductionStats: () => void;
 
   alarms: Alarm[];
-  confirmAlarm: (alarmId: string, handler: string) => void;
-  resolveAlarm: (alarmId: string, handler: string) => void;
+  confirmAlarm: (alarmId: string, params: { handler: string; remark: string }) => void;
+  resolveAlarm: (alarmId: string, params: { handler: string; remark: string }) => void;
   addAlarm: (alarm: Alarm) => void;
   refreshAlarms: () => void;
+  persistAlarms: () => void;
+  loadPersistedAlarms: () => Alarm[];
 
   isRefreshing: boolean;
   lastUpdateTime: string;
@@ -150,31 +152,68 @@ export const useAppStore = create<AppState>((set, get) => ({
       productionStats: generateProductionStats(),
     })),
 
-  alarms: generateAlarms(),
-  confirmAlarm: (alarmId, handler) =>
-    set((state) => ({
-      alarms: state.alarms.map((alarm) =>
+  alarms: (() => {
+    try {
+      const persisted = localStorage.getItem('cement_alarm_records');
+      if (persisted) {
+        return JSON.parse(persisted) as Alarm[];
+      }
+    } catch {}
+    return generateAlarms();
+  })(),
+  confirmAlarm: (alarmId, { handler, remark }) =>
+    set((state) => {
+      const alarms = state.alarms.map((alarm) =>
         alarm.id === alarmId
-          ? { ...alarm, status: "confirmed" as const, handler }
+          ? { ...alarm, status: "confirmed" as const, handler, confirmedAt: new Date().toISOString(), confirmRemark: remark }
           : alarm
-      ),
-    })),
-  resolveAlarm: (alarmId, handler) =>
-    set((state) => ({
-      alarms: state.alarms.map((alarm) =>
+      );
+      try { localStorage.setItem('cement_alarm_records', JSON.stringify(alarms)); } catch {}
+      return { alarms };
+    }),
+  resolveAlarm: (alarmId, { handler, remark }) =>
+    set((state) => {
+      const alarms = state.alarms.map((alarm) =>
         alarm.id === alarmId
-          ? { ...alarm, status: "resolved" as const, handler }
+          ? { ...alarm, status: "resolved" as const, handler, resolvedAt: new Date().toISOString(), resolveRemark: remark }
           : alarm
-      ),
-    })),
+      );
+      try { localStorage.setItem('cement_alarm_records', JSON.stringify(alarms)); } catch {}
+      return { alarms };
+    }),
   addAlarm: (alarm) =>
-    set((state) => ({
-      alarms: [alarm, ...state.alarms],
-    })),
+    set((state) => {
+      const alarms = [alarm, ...state.alarms];
+      try { localStorage.setItem('cement_alarm_records', JSON.stringify(alarms)); } catch {}
+      return { alarms };
+    }),
   refreshAlarms: () =>
-    set(() => ({
-      alarms: generateAlarms(),
-    })),
+    set((state) => {
+      const newAlarms = generateAlarms();
+      const handledIds = new Set(
+        state.alarms
+          .filter((a) => a.status === "confirmed" || a.status === "resolved")
+          .map((a) => a.id)
+      );
+      const preserved = state.alarms.filter((a) => handledIds.has(a.id));
+      const newOnly = newAlarms.filter((a) => !handledIds.has(a.id));
+      const alarms = [...preserved, ...newOnly];
+      try { localStorage.setItem('cement_alarm_records', JSON.stringify(alarms)); } catch {}
+      return { alarms };
+    }),
+  persistAlarms: () => {
+    const alarms = get().alarms;
+    try { localStorage.setItem('cement_alarm_records', JSON.stringify(alarms)); } catch {}
+  },
+  loadPersistedAlarms: () => {
+    try {
+      const persisted = localStorage.getItem('cement_alarm_records');
+      if (persisted) {
+        return JSON.parse(persisted) as Alarm[];
+      }
+    } catch {}
+    return [];
+  },
 
   isRefreshing: false,
   lastUpdateTime: new Date().toISOString(),

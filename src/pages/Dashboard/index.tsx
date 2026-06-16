@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useAppStore } from "@/store";
 import KPICard from "@/components/cards/KPICard";
 import LineChart from "@/components/charts/LineChart";
@@ -119,20 +119,37 @@ export default function Dashboard() {
   const alarmStatusColors = {
     pending: "text-status-alarm",
     confirmed: "text-status-warning",
-    resolved: "text-status-normal",
+    resolved: "text-slate-500",
+  };
+
+  const [activeForm, setActiveForm] = useState<string | null>(null);
+  const [formHandler, setFormHandler] = useState("操作员");
+  const [formRemark, setFormRemark] = useState("");
+  const [formAction, setFormAction] = useState<"confirm" | "resolve">("confirm");
+
+  const openForm = (alarmId: string, action: "confirm" | "resolve") => {
+    setActiveForm(alarmId);
+    setFormAction(action);
+    setFormHandler("操作员");
+    setFormRemark("");
+  };
+
+  const submitForm = (alarmId: string) => {
+    if (formAction === "confirm") {
+      useAppStore.getState().confirmAlarm(alarmId, { handler: formHandler, remark: formRemark });
+    } else {
+      useAppStore.getState().resolveAlarm(alarmId, { handler: formHandler, remark: formRemark });
+    }
+    setActiveForm(null);
+  };
+
+  const cancelForm = () => {
+    setActiveForm(null);
   };
 
   const sortedAlarms = useMemo(() => {
     return [...alarms].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [alarms]);
-
-  const handleConfirm = (alarmId: string) => {
-    useAppStore.getState().confirmAlarm(alarmId, "操作员");
-  };
-
-  const handleResolve = (alarmId: string) => {
-    useAppStore.getState().resolveAlarm(alarmId, "操作员");
-  };
 
   return (
     <div className="space-y-6">
@@ -316,14 +333,20 @@ export default function Dashboard() {
             {sortedAlarms.map((alarm) => (
               <div
                 key={alarm.id}
-                className={`rounded-lg p-3 border ${alarmLevelColors[alarm.level]}`}
+                className={`rounded-lg p-3 border ${
+                  alarm.status === "resolved"
+                    ? "bg-slate-800/30 border-slate-700/50 opacity-60"
+                    : alarmLevelColors[alarm.level]
+                }`}
               >
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className="badge bg-slate-700 text-slate-300">
                       {alarmLevelLabels[alarm.level]}
                     </span>
-                    <span className="text-sm font-medium">{alarm.parameter}</span>
+                    <span className={`text-sm font-medium ${alarm.status === "resolved" ? "text-slate-400" : ""}`}>
+                      {alarm.parameter}
+                    </span>
                   </div>
                   <span className={`text-xs font-medium ${alarmStatusColors[alarm.status]}`}>
                     {alarmStatusLabels[alarm.status]}
@@ -333,22 +356,74 @@ export default function Dashboard() {
                   <span>当前值: <span className="text-slate-200 font-medium">{alarm.value}</span> / 阈值: {alarm.threshold}</span>
                   <span>{new Date(alarm.timestamp).toLocaleTimeString()}</span>
                 </div>
-                {alarm.status !== "resolved" && (
+                {(alarm.status === "confirmed" || alarm.status === "resolved") && alarm.handler && (
+                  <div className="text-xs text-slate-400 bg-slate-800/40 rounded p-2 mb-2 space-y-1">
+                    <div className="flex gap-4">
+                      <span>处理人: <span className="text-slate-200">{alarm.handler}</span></span>
+                      <span>处理时间: <span className="text-slate-200">{new Date(alarm.confirmedAt || alarm.resolvedAt || "").toLocaleString()}</span></span>
+                    </div>
+                    {alarm.confirmRemark && alarm.status === "confirmed" && (
+                      <div>确认备注: <span className="text-slate-300">{alarm.confirmRemark}</span></div>
+                    )}
+                    {alarm.resolveRemark && alarm.status === "resolved" && (
+                      <div>解决备注: <span className="text-slate-300">{alarm.resolveRemark}</span></div>
+                    )}
+                  </div>
+                )}
+                {alarm.status !== "resolved" && activeForm !== alarm.id && (
                   <div className="flex gap-2 pt-2 border-t border-slate-700/50">
                     {alarm.status === "pending" && (
                       <button
-                        onClick={() => handleConfirm(alarm.id)}
+                        onClick={() => openForm(alarm.id, "confirm")}
                         className="flex-1 px-2 py-1 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
                       >
                         确认
                       </button>
                     )}
                     <button
-                      onClick={() => handleResolve(alarm.id)}
+                      onClick={() => openForm(alarm.id, "resolve")}
                       className="flex-1 px-2 py-1 text-xs font-medium bg-status-normal/20 hover:bg-status-normal/30 text-status-normal rounded transition-colors"
                     >
                       解决
                     </button>
+                  </div>
+                )}
+                {activeForm === alarm.id && (
+                  <div className="mt-2 pt-2 border-t border-slate-700/50 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-400 w-14 shrink-0">处理人</label>
+                      <input
+                        type="text"
+                        value={formHandler}
+                        onChange={(e) => setFormHandler(e.target.value)}
+                        className="input-field flex-1 text-xs py-1"
+                        placeholder="输入处理人"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-400 w-14 shrink-0">备注</label>
+                      <input
+                        type="text"
+                        value={formRemark}
+                        onChange={(e) => setFormRemark(e.target.value)}
+                        className="input-field flex-1 text-xs py-1"
+                        placeholder="输入备注信息"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => submitForm(alarm.id)}
+                        className="flex-1 px-2 py-1 text-xs font-medium bg-industrial-500 hover:bg-industrial-400 text-white rounded transition-colors"
+                      >
+                        {formAction === "confirm" ? "确认" : "解决"}
+                      </button>
+                      <button
+                        onClick={cancelForm}
+                        className="flex-1 px-2 py-1 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
+                      >
+                        取消
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

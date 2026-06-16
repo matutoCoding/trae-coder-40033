@@ -2,10 +2,81 @@ import { useMemo, useState, useEffect } from "react";
 import { useAppStore } from "@/store";
 import LineChart from "@/components/charts/LineChart";
 import GaugeChart from "@/components/charts/GaugeChart";
-import { PieChart, Target, TrendingUp, History, Mountain, Droplets, Cog, Layers, Flame as FlameIcon, Calculator, RotateCcw, Plus, Minus } from "lucide-react";
+import {
+  PieChart,
+  Target,
+  TrendingUp,
+  History,
+  Mountain,
+  Droplets,
+  Cog,
+  Layers,
+  Flame as FlameIcon,
+  Calculator,
+  RotateCcw,
+  Plus,
+  Minus,
+  Save,
+  Trash2,
+  Check,
+  X,
+  GitCompare,
+} from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
 import { calculateModulus, targetRanges } from "@/utils/formulaCalculator";
+
+interface RatioInput {
+  limestone: number;
+  clay: number;
+  ironPowder: number;
+  sandstone: number;
+  coalAsh: number;
+}
+
+interface RecipePlan {
+  id: string;
+  name: string;
+  ratios: RatioInput;
+  createdAt: string;
+}
+
+const STORAGE_KEY = "cement_recipe_plans";
+
+const defaultPlans: RecipePlan[] = [
+  {
+    id: "default-1",
+    name: "常规配料方案",
+    ratios: { limestone: 80, clay: 12, ironPowder: 3, sandstone: 4, coalAsh: 1 },
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "default-2",
+    name: "高KH方案",
+    ratios: { limestone: 83, clay: 9, ironPowder: 3, sandstone: 4, coalAsh: 1 },
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "default-3",
+    name: "低SM方案",
+    ratios: { limestone: 78, clay: 13, ironPowder: 4, sandstone: 4, coalAsh: 1 },
+    createdAt: new Date().toISOString(),
+  },
+];
+
+function loadPlans(): RecipePlan[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return defaultPlans;
+}
+
+function persistPlans(plans: RecipePlan[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(plans));
+  } catch {}
+}
 
 export default function RawMaterial() {
   const { realtimeData, historyData } = useAppStore();
@@ -24,7 +95,7 @@ export default function RawMaterial() {
     coalAsh: 1,
   };
 
-  const [adjustRatios, setAdjustRatios] = useState({
+  const [adjustRatios, setAdjustRatios] = useState<RatioInput>({
     limestone: rawMaterial.limestone,
     clay: rawMaterial.clay,
     ironPowder: rawMaterial.ironPowder,
@@ -32,20 +103,39 @@ export default function RawMaterial() {
     coalAsh: rawMaterial.coalAsh,
   });
 
+  const [plans, setPlans] = useState<RecipePlan[]>(loadPlans);
+  const [showSaveForm, setShowSaveForm] = useState(false);
+  const [planName, setPlanName] = useState("");
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+
+  useEffect(() => {
+    persistPlans(plans);
+  }, [plans]);
+
   const modulusResult = useMemo(() => calculateModulus(adjustRatios), [adjustRatios]);
 
-  const handleRatioChange = (key: keyof typeof adjustRatios, value: number) => {
+  const selectedPlan = useMemo(
+    () => plans.find((p) => p.id === selectedPlanId) || null,
+    [plans, selectedPlanId]
+  );
+
+  const planModulus = useMemo(
+    () => (selectedPlan ? calculateModulus(selectedPlan.ratios) : null),
+    [selectedPlan]
+  );
+
+  const handleRatioChange = (key: keyof RatioInput, value: number) => {
     setAdjustRatios((prev) => ({
       ...prev,
       [key]: Math.max(0, Math.min(100, Number(value.toFixed(1)))),
     }));
   };
 
-  const handleIncrement = (key: keyof typeof adjustRatios) => {
+  const handleIncrement = (key: keyof RatioInput) => {
     handleRatioChange(key, adjustRatios[key] + 0.5);
   };
 
-  const handleDecrement = (key: keyof typeof adjustRatios) => {
+  const handleDecrement = (key: keyof RatioInput) => {
     handleRatioChange(key, adjustRatios[key] - 0.5);
   };
 
@@ -57,6 +147,43 @@ export default function RawMaterial() {
       sandstone: rawMaterial.sandstone,
       coalAsh: rawMaterial.coalAsh,
     });
+  };
+
+  const savePlan = () => {
+    if (!planName.trim()) return;
+    const newPlan: RecipePlan = {
+      id: `plan-${Date.now()}`,
+      name: planName.trim(),
+      ratios: { ...adjustRatios },
+      createdAt: new Date().toISOString(),
+    };
+    setPlans((prev) => [...prev, newPlan]);
+    setPlanName("");
+    setShowSaveForm(false);
+  };
+
+  const deletePlan = (id: string) => {
+    setPlans((prev) => prev.filter((p) => p.id !== id));
+    if (selectedPlanId === id) setSelectedPlanId(null);
+  };
+
+  const applyPlan = (plan: RecipePlan) => {
+    setAdjustRatios({ ...plan.ratios });
+    setSelectedPlanId(plan.id);
+  };
+
+  const getDiffColor = (diff: number) => {
+    const abs = Math.abs(diff);
+    if (abs <= 0.5) return "text-status-normal";
+    if (abs <= 2) return "text-yellow-400";
+    return "text-status-alarm";
+  };
+
+  const getDiffBg = (diff: number) => {
+    const abs = Math.abs(diff);
+    if (abs <= 0.5) return "bg-status-normal/10";
+    if (abs <= 2) return "bg-yellow-400/10";
+    return "bg-status-alarm/10";
   };
 
   const adjustMaterials = [
@@ -268,7 +395,7 @@ export default function RawMaterial() {
           <Calculator className="w-5 h-5 text-industrial-400" />
           配方调整计算器
         </h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="space-y-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-slate-400">原料配比调整</span>
@@ -317,7 +444,7 @@ export default function RawMaterial() {
                 );
               })}
             </div>
-            <div className="pt-3 border-t border-slate-700">
+            <div className="pt-3 border-t border-slate-700 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-slate-400">总比例</span>
                 <span className={`text-lg font-bold ${modulusResult.isValid ? "text-status-normal" : "text-status-alarm"}`}>
@@ -328,6 +455,40 @@ export default function RawMaterial() {
                 <p className="text-xs text-status-alarm mt-1">
                   ⚠ 总比例不等于100%，请调整配比
                 </p>
+              )}
+              {showSaveForm ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={planName}
+                    onChange={(e) => setPlanName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && savePlan()}
+                    className="input-field flex-1 text-xs py-1"
+                    placeholder="输入方案名称"
+                    autoFocus
+                  />
+                  <button
+                    onClick={savePlan}
+                    disabled={!planName.trim()}
+                    className="w-7 h-7 rounded bg-industrial-500 hover:bg-industrial-400 disabled:opacity-40 flex items-center justify-center text-white transition-colors"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => { setShowSaveForm(false); setPlanName(""); }}
+                    className="w-7 h-7 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowSaveForm(true)}
+                  className="flex items-center gap-1 text-xs text-industrial-400 hover:text-industrial-300 transition-colors"
+                >
+                  <Save className="w-3 h-3" />
+                  保存为方案
+                </button>
               )}
             </div>
           </div>
@@ -379,7 +540,112 @@ export default function RawMaterial() {
               </div>
             </div>
           </div>
+
+          <div className="space-y-3">
+            <div className="text-sm text-slate-400 mb-2">已保存方案</div>
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {plans.map((plan) => (
+                <div
+                  key={plan.id}
+                  className={`rounded-lg p-3 border transition-colors ${
+                    selectedPlanId === plan.id
+                      ? "border-industrial-500 bg-industrial-500/10"
+                      : "border-slate-700 bg-slate-900/50 hover:border-slate-600"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <button
+                      onClick={() => setSelectedPlanId(plan.id)}
+                      className="text-sm font-medium text-slate-200 hover:text-industrial-400 transition-colors truncate text-left"
+                    >
+                      {plan.name}
+                    </button>
+                    <span className="text-xs text-slate-500 shrink-0 ml-2">
+                      {new Date(plan.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400 mb-2">
+                    石灰石{plan.ratios.limestone}% 粘土{plan.ratios.clay}% 铁粉{plan.ratios.ironPowder}% 砂岩{plan.ratios.sandstone}% 煤灰{plan.ratios.coalAsh}%
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => applyPlan(plan)}
+                      className="flex-1 px-2 py-1 text-xs font-medium bg-industrial-500/20 hover:bg-industrial-500/30 text-industrial-400 rounded transition-colors"
+                    >
+                      应用
+                    </button>
+                    <button
+                      onClick={() => deletePlan(plan.id)}
+                      className="px-2 py-1 text-xs font-medium bg-slate-700 hover:bg-red-900/40 text-slate-400 hover:text-status-alarm rounded transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
+
+        {selectedPlan && planModulus && (
+          <div className="mt-6 pt-4 border-t border-slate-700">
+            <h4 className="section-title text-sm mb-3">
+              <GitCompare className="w-4 h-4 text-industrial-400" />
+              当前 vs 方案对比（{selectedPlan.name}）
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                <div className="text-xs text-slate-400 mb-2">配比差异</div>
+                <div className="space-y-1.5">
+                  {adjustMaterials.map((mat) => {
+                    const current = adjustRatios[mat.key];
+                    const planVal = selectedPlan.ratios[mat.key];
+                    const diff = current - planVal;
+                    return (
+                      <div key={mat.key} className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400 w-16">{mat.name}</span>
+                        <span className="text-slate-300 w-14 text-right">{current}%</span>
+                        <span className="text-slate-500">vs</span>
+                        <span className="text-slate-300 w-14 text-right">{planVal}%</span>
+                        <span className={`w-16 text-right font-medium rounded px-1 ${getDiffColor(diff)} ${getDiffBg(diff)}`}>
+                          {diff > 0 ? "+" : ""}{diff.toFixed(1)}%
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                <div className="text-xs text-slate-400 mb-2">三率值差异</div>
+                <div className="space-y-1.5">
+                  {([
+                    { label: "KH", current: modulusResult.kh, plan: planModulus.kh, decimals: 3 },
+                    { label: "SM", current: modulusResult.sm, plan: planModulus.sm, decimals: 2 },
+                    { label: "IM", current: modulusResult.im, plan: planModulus.im, decimals: 2 },
+                  ] as const).map((item) => {
+                    const diff = item.current - item.plan;
+                    return (
+                      <div key={item.label} className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400 w-16">{item.label}</span>
+                        <span className="text-slate-300 w-14 text-right">{item.current.toFixed(item.decimals)}</span>
+                        <span className="text-slate-500">vs</span>
+                        <span className="text-slate-300 w-14 text-right">{item.plan.toFixed(item.decimals)}</span>
+                        <span className={`w-16 text-right font-medium rounded px-1 ${getDiffColor(diff)} ${getDiffBg(diff)}`}>
+                          {diff > 0 ? "+" : ""}{diff.toFixed(item.decimals)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-700/50 text-xs text-slate-500 flex items-center gap-4">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-status-normal inline-block" /> 一致/接近</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" /> 小偏差</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-status-alarm inline-block" /> 大偏差</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="data-card">

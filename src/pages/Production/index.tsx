@@ -1,6 +1,7 @@
+import { useMemo } from "react";
 import { useAppStore } from "@/store";
 import KPICard from "@/components/cards/KPICard";
-import BarChart from "@/components/charts/BarChart";
+
 import {
   Factory,
   TrendingUp,
@@ -14,6 +15,14 @@ import {
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
 
+const SHIFT_TARGETS: Record<string, { target: number; color: string; bg: string }> = {
+  早班: { target: 1100, color: "text-status-normal", bg: "bg-status-normal/20" },
+  中班: { target: 1000, color: "text-industrial-400", bg: "bg-industrial-500/20" },
+  晚班: { target: 900, color: "text-status-warning", bg: "bg-status-warning/20" },
+};
+const COAL_TARGET = 110;
+const POWER_TARGET = 60;
+
 export default function Production() {
   const { realtimeData, productionStats } = useAppStore();
   const { kpiData } = realtimeData;
@@ -22,8 +31,33 @@ export default function Production() {
   const todayProgress = (kpiData.dailyOutput / DAILY_TARGET) * 100;
 
   const todayStats = productionStats.slice(0, 3);
-  const shiftOutputs = todayStats.map((s) => s.hourlyOutput * 8);
-  const shiftNames = todayStats.map((s) => s.shift);
+
+  const shiftCompletionData = useMemo(() => {
+    return todayStats.map((s) => {
+      const cfg = SHIFT_TARGETS[s.shift] || { target: 1000, color: "text-slate-300", bg: "bg-slate-600/20" };
+      const actual = s.hourlyOutput * 8;
+      const deviation = actual - cfg.target;
+      const deviationRate = (deviation / cfg.target) * 100;
+      const completionRate = (actual / cfg.target) * 100;
+      return {
+        shift: s.shift,
+        target: cfg.target,
+        actual,
+        deviation,
+        deviationRate,
+        completionRate,
+        coal: s.standardCoalConsumption,
+        power: s.powerConsumption,
+        color: cfg.color,
+        bg: cfg.bg,
+      };
+    });
+  }, [todayStats]);
+
+  const totalTarget = Object.values(SHIFT_TARGETS).reduce((s, v) => s + v.target, 0);
+  const totalActual = kpiData.dailyOutput;
+  const totalDeviation = totalActual - totalTarget;
+  const totalCompletionRate = (totalActual / totalTarget) * 100;
 
   const uniqueDates = [...new Set(productionStats.map((s) => s.date))].slice(0, 7);
   const dailyOutputs = uniqueDates.map((date) => {
@@ -111,15 +145,7 @@ export default function Production() {
     ],
   };
 
-  const formatTime = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+
 
   return (
     <div className="space-y-6">
@@ -215,22 +241,93 @@ export default function Production() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="data-card">
           <h3 className="section-title">
-            <BarChart3 className="w-5 h-5 text-industrial-400" />
-            班次产量柱状图
+            <Target className="w-5 h-5 text-industrial-400" />
+            班次目标完成情况
           </h3>
-          <BarChart
-            xAxisData={shiftNames}
-            series={[
-              {
-                name: "产量(t)",
-                data: shiftOutputs,
-                color: "#3B82F6",
-              },
-            ]}
-            yAxisName="产量(t)"
-            height={280}
-            showLegend={false}
-          />
+          <div className="space-y-3">
+            {shiftCompletionData.map((s) => (
+              <div key={s.shift} className="bg-slate-800/60 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`badge ${s.bg} ${s.color}`}>{s.shift}</span>
+                    <span className="text-xs text-slate-400">
+                      目标 <span className="text-slate-200 font-medium">{s.target}t</span>
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-sm font-medium text-slate-100">{s.actual.toFixed(0)}t</span>
+                    <span className={`text-xs ml-2 ${s.deviation >= 0 ? "text-status-normal" : "text-status-alarm"}`}>
+                      {s.deviation >= 0 ? "+" : ""}{s.deviation.toFixed(0)}t ({s.deviationRate >= 0 ? "+" : ""}{s.deviationRate.toFixed(1)}%)
+                    </span>
+                  </div>
+                </div>
+                <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      s.completionRate >= 100
+                        ? "bg-status-normal"
+                        : s.completionRate >= 80
+                          ? "bg-industrial-500"
+                          : "bg-status-warning"
+                    }`}
+                    style={{ width: `${Math.min(100, s.completionRate)}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span>完成率 <span className="text-slate-200 font-medium">{s.completionRate.toFixed(1)}%</span></span>
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1">
+                      <Flame className="w-3 h-3" />
+                      {s.coal.toFixed(1)}
+                      <span className={s.coal > COAL_TARGET ? "text-status-alarm" : "text-status-normal"}>
+                        /{COAL_TARGET}
+                      </span>
+                      kg/t
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Zap className="w-3 h-3" />
+                      {s.power.toFixed(1)}
+                      <span className={s.power > POWER_TARGET ? "text-status-alarm" : "text-status-normal"}>
+                        /{POWER_TARGET}
+                      </span>
+                      kWh/t
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div className="border-t border-slate-700 pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="badge bg-slate-600/30 text-slate-300">今日合计</span>
+                  <span className="text-xs text-slate-400">
+                    目标 <span className="text-slate-200 font-medium">{totalTarget}t</span>
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-sm font-semibold text-slate-100">{totalActual}t</span>
+                  <span className={`text-xs ml-2 ${totalDeviation >= 0 ? "text-status-normal" : "text-status-alarm"}`}>
+                    {totalDeviation >= 0 ? "+" : ""}{totalDeviation}t
+                  </span>
+                </div>
+              </div>
+              <div className="h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    totalCompletionRate >= 100
+                      ? "bg-status-normal"
+                      : totalCompletionRate >= 80
+                        ? "bg-industrial-500"
+                        : "bg-status-warning"
+                  }`}
+                  style={{ width: `${Math.min(100, totalCompletionRate)}%` }}
+                />
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                总完成率 <span className="text-slate-200 font-medium">{totalCompletionRate.toFixed(1)}%</span>
+              </p>
+            </div>
+          </div>
         </div>
 
         <div className="data-card">

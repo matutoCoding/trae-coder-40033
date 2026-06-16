@@ -19,6 +19,160 @@ import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
 import type { KilnData, PreheaterData, CoolerData, ProductionStatus } from "@/types";
 
+function getTrendRange<T extends { timestamp: string }>(
+  arr: T[],
+  targetTs: string,
+  halfSpan: number
+): { data: T[]; centerIndex: number } {
+  if (arr.length === 0) return { data: [], centerIndex: -1 };
+  const sorted = [...arr].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  const target = new Date(targetTs).getTime();
+  let closestIdx = 0;
+  let minDiff = Math.abs(new Date(sorted[0].timestamp).getTime() - target);
+  for (let i = 1; i < sorted.length; i++) {
+    const diff = Math.abs(new Date(sorted[i].timestamp).getTime() - target);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closestIdx = i;
+    }
+  }
+  const start = Math.max(0, closestIdx - halfSpan);
+  const data = sorted.slice(start, start + halfSpan * 2 + 1);
+  const centerIndex = closestIdx - start;
+  return { data, centerIndex: Math.min(centerIndex, data.length - 1) };
+}
+
+function buildSparklineOption(
+  values: number[],
+  centerIndex: number,
+  color: string,
+  label: string,
+  unit: string
+): EChartsOption {
+  return {
+    tooltip: {
+      trigger: "axis",
+      backgroundColor: "#1E293B",
+      borderColor: "#334155",
+      textStyle: { color: "#F1F5F9", fontSize: 11 },
+      formatter: (params: unknown) => {
+        const p = (params as { name: string; value: number }[])[0];
+        return p ? `${label}: ${p.value}${unit}` : "";
+      },
+    },
+    grid: { left: 4, right: 4, top: 20, bottom: 4, containLabel: false },
+    xAxis: {
+      type: "category",
+      data: values.map((_, i) => `${i}`),
+      axisLine: { show: false },
+      axisTick: { show: true, lineStyle: { color: "#475569" }, length: 3 },
+      axisLabel: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      axisLine: { show: false },
+      axisTick: { show: true, lineStyle: { color: "#475569" }, length: 3 },
+      axisLabel: { show: false },
+      splitLine: { show: false },
+    },
+    graphic: [
+      {
+        type: "text",
+        left: 6,
+        top: 2,
+        style: {
+          text: `${label} (${unit})`,
+          fill: "#94A3B8",
+          fontSize: 11,
+        },
+      },
+    ],
+    series: [
+      {
+        type: "line",
+        data: values,
+        smooth: true,
+        symbol: "none",
+        lineStyle: { width: 1.5, color },
+        areaStyle: {
+          color: {
+            type: "linear",
+            x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: color + "33" },
+              { offset: 1, color: color + "00" },
+            ],
+          },
+        },
+        markLine: {
+          silent: true,
+          symbol: "none",
+          lineStyle: { color: "#F59E0B", type: "dashed", width: 1 },
+          data: [{ xAxis: centerIndex }],
+          label: { show: false },
+        },
+      },
+    ],
+  };
+}
+
+function SparklineGrid({ qualityTs }: { qualityTs: string }) {
+  const { historyData } = useAppStore();
+
+  const sparklines = useMemo(() => {
+    const halfSpan = 3;
+    const kilnRange = getTrendRange(historyData.kilnData, qualityTs, halfSpan);
+    const preheaterRange = getTrendRange(historyData.preheaterData, qualityTs, halfSpan);
+    const coolerRange = getTrendRange(historyData.coolerData, qualityTs, halfSpan);
+
+    return [
+      {
+        label: "窑速",
+        unit: "r/min",
+        values: kilnRange.data.map((d) => d.kilnSpeed),
+        centerIndex: kilnRange.centerIndex,
+        color: "#3B82F6",
+      },
+      {
+        label: "窑电流",
+        unit: "A",
+        values: kilnRange.data.map((d) => d.kilnCurrent),
+        centerIndex: kilnRange.centerIndex,
+        color: "#8B5CF6",
+      },
+      {
+        label: "分解炉温度",
+        unit: "℃",
+        values: preheaterRange.data.map((d) => d.calcinerTemp),
+        centerIndex: preheaterRange.centerIndex,
+        color: "#F59E0B",
+      },
+      {
+        label: "熟料冷却温度",
+        unit: "℃",
+        values: coolerRange.data.map((d) => d.clinkerOutletTemp),
+        centerIndex: coolerRange.centerIndex,
+        color: "#10B981",
+      },
+    ];
+  }, [historyData, qualityTs]);
+
+  return (
+    <div className="grid grid-cols-2 gap-3 mt-4">
+      {sparklines.map((s) => (
+        <div key={s.label} className="bg-slate-900/60 rounded-lg p-2">
+          <ReactECharts
+            option={buildSparklineOption(s.values, s.centerIndex, s.color, s.label, s.unit)}
+            style={{ height: 80, width: "100%" }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Quality() {
   const { realtimeData, historyData } = useAppStore();
   const { qualityData, kpiData } = realtimeData;
@@ -647,6 +801,7 @@ export default function Quality() {
                                 </p>
                               </div>
                             </div>
+                            <SparklineGrid qualityTs={d.timestamp} />
                           </td>
                         </tr>
                       )}
